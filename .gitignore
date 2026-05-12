@@ -10,8 +10,17 @@ bin/qdrant
 data/
 *.db
 
+# Qdrant runtime
+.qdrant-initialized
+snapshots/
+
 # Environment
 .env
 .venv/
 __pycache__/
 *.pyc
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

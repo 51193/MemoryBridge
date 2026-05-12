@@ -214,11 +214,20 @@ bin/qdrant
 data/
 *.db
 
+# Qdrant 运行时
+.qdrant-initialized
+snapshots/
+
 # 环境
 .env
 .venv/
 __pycache__/
 *.pyc
+
+# 工具缓存
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 ```
 
 ## 目录结构（部署视角）

@@ -19,15 +19,14 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
-      - name: Build wheel
-        run: uv build
-
-      - name: Install shiv
-        run: uv tool install shiv --python 3.11
+      - name: Install project dependencies
+        run: uv sync --python 3.11
 
       - name: Build .pyz with shiv
         run: |
-          uvx shiv \
+          mkdir -p dist
+          uv run python -m pip install shiv
+          uv run shiv \
             --compressed \
             --console-script host-manager \
             --output-file dist/memorybridge.pyz \
@@ -39,7 +38,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          name: Release ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
             dist/memorybridge.pyz
