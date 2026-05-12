@@ -3,7 +3,7 @@
 import logging
 from collections import deque
 
-from .logging import structured_debug, structured_info
+from ..logging import structured_debug, structured_info
 
 logger: logging.Logger = logging.getLogger(__name__)
 

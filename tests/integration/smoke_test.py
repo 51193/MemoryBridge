@@ -35,7 +35,7 @@ QUIET: bool = False
 PASSED: int = 0
 FAILED: int = 0
 STEP: int = 0
-TOTAL: int = 15
+TOTAL: int = 17
 
 AGENT: str = "agent-smoke"
 AGENT_OTHER: str = "agent-other"

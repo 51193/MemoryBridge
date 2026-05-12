@@ -6,8 +6,8 @@ from typing import Any
 from mem0 import Memory
 
 from ..config import Settings
-from ..exceptions import MemorySearchError
-from .logging import structured_debug
+from ..exceptions import MemorySearchError, MemoryStoreError
+from ..logging import structured_debug
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ def build_mem0_config(settings: Settings) -> dict[str, Any]:
             "config": {
                 "model": settings.embedding_model,
                 "api_key": settings.dashscope_api_key,
-                "openai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "openai_base_url": settings.dashscope_base_url,
                 "embedding_dims": settings.embedding_dims,
             },
         },
@@ -40,12 +40,12 @@ def build_mem0_config(settings: Settings) -> dict[str, Any]:
             "config": {
                 "host": settings.qdrant_host,
                 "port": settings.qdrant_port,
-                "collection_name": "memory_bridge",
+                "collection_name": settings.mem0_collection_name,
                 "embedding_model_dims": settings.embedding_dims,
                 "on_disk": True,
             },
         },
-        "history_db_path": "./data/mem0_history.db",
+        "history_db_path": settings.mem0_history_db_path,
     }
     structured_debug(
         logger,
@@ -117,13 +117,9 @@ class MemoryManager:
         """Store conversation memory.
 
         Uses Mem0 v2 single-pass ADD-only extraction.
-        Memory storage failure is logged but does not raise.
 
-        Args:
-            messages: The conversation messages.
-            user_id: The agent/user ID for memory isolation.
-            metadata: Optional metadata to attach.
-            prompt: Optional custom extraction instructions for Mem0.
+        Raises:
+            MemoryStoreError: If the write to Mem0/Qdrant fails.
         """
         sid: str = str(metadata.get("session_id", "")) if metadata else ""
         structured_debug(
@@ -139,7 +135,14 @@ class MemoryManager:
                 extra["prompt"] = prompt
             self._memory.add(messages, user_id=user_id, metadata=metadata, **extra)
             structured_debug(logger, "memory stored")
+        except Exception as e:
+            raise MemoryStoreError(
+                f"Memory store failed for user_id={user_id}: {e}"
+            ) from e
+
+    def close(self) -> None:
+        """Release Mem0 resources (Qdrant client, SQLite history DB)."""
+        try:
+            self._memory.close()
         except Exception:
-            logger.exception(
-                "MemoryStoreError: failed to store memory user_id=%s", user_id
-            )
+            logger.warning("failed to close Mem0 cleanly", exc_info=True)

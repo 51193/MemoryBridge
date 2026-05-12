@@ -169,7 +169,7 @@ class TestMemoryManager:
             prompt="重点关注技术偏好",
         )
 
-    def test_add_failure_logs_and_does_not_raise(self) -> None:
+    def test_add_failure_raises_memory_store_error(self) -> None:
         mock_memory: MagicMock = MagicMock()
         mock_memory.add.side_effect = RuntimeError("write failed")
 
@@ -177,9 +177,14 @@ class TestMemoryManager:
             "memory_bridge.core.memory.Memory.from_config", return_value=mock_memory
         ):
             manager: MemoryManager = MemoryManager({})
-            manager.add(
-                [{"role": "user", "content": "hello"}],
-                user_id="agent-1",
-            )
+            from memory_bridge.exceptions import MemoryStoreError
+
+            with pytest.raises(
+                MemoryStoreError, match="Memory store failed for user_id=agent-1"
+            ):
+                manager.add(
+                    [{"role": "user", "content": "hello"}],
+                    user_id="agent-1",
+                )
 
         mock_memory.add.assert_called_once()

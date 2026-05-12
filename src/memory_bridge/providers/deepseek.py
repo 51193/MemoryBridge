@@ -9,8 +9,8 @@ from typing import Any, Literal, cast
 
 import httpx
 
-from ..core.logging import structured_debug, structured_info
 from ..exceptions import MemoryBridgeError
+from ..logging import structured_debug, structured_info
 from ..models.request import ChatRequest, Message
 from ..models.response import (
     ChatResponse,
@@ -103,45 +103,19 @@ class DeepSeekProvider(AbstractLLMProvider):
         )
         try:
             async with self._client.stream("POST", url, json=payload) as response:
-                if response.status_code != 200:
-                    body_bytes: bytes = await response.aread()
-                    logger.error(
-                        "deepseek stream http error status=%s body=%s",
-                        response.status_code,
-                        body_bytes.decode()[:500],
-                    )
-                    raise ProviderError(
-                        f"DeepSeek returned {response.status_code}: {body_bytes.decode()}"
-                    )
+                await self._check_response(response)
                 async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
+                    if not line.startswith("data: ") or line[6:] == "[DONE]":
+                        if line[6:] == "[DONE]":
+                            break
                         continue
-                    data: str = line[6:]
-                    if data == "[DONE]":
-                        break
-                    chunk: dict[str, Any] = json.loads(data)
+                    chunk: dict[str, Any] = json.loads(line[6:])
                     chunk_count += 1
                     for choice in chunk.get("choices", []):
                         c: str = choice.get("delta", {}).get("content", "") or ""
                         total_content_len += len(c)
-                    yield StreamChunk(
-                        id=request_id,
-                        created=created,
-                        model=model,
-                        choices=[
-                            StreamChoice(
-                                index=choice.get("index", 0),
-                                delta=DeltaMessage(
-                                    role=choice.get("delta", {}).get("role"),
-                                    content=choice.get("delta", {}).get("content"),
-                                    reasoning_content=choice.get("delta", {}).get(
-                                        "reasoning_content"
-                                    ),
-                                ),
-                                finish_reason=choice.get("finish_reason"),
-                            )
-                            for choice in chunk.get("choices", [])
-                        ],
+                    yield self._build_stream_chunk(
+                        request_id, created, model, chunk
                     )
         except httpx.RequestError as e:
             logger.error("deepseek stream error: %s", e)
@@ -153,6 +127,42 @@ class DeepSeekProvider(AbstractLLMProvider):
             chunks=chunk_count,
             total_content_len=total_content_len,
         )
+
+    @staticmethod
+    def _build_stream_chunk(
+        request_id: str, created: int, model: str, chunk: dict[str, Any]
+    ) -> StreamChunk:
+        return StreamChunk(
+            id=request_id,
+            created=created,
+            model=model,
+            choices=[
+                StreamChoice(
+                    index=choice.get("index", 0),
+                    delta=DeltaMessage(
+                        role=choice.get("delta", {}).get("role"),
+                        content=choice.get("delta", {}).get("content"),
+                        reasoning_content=choice.get("delta", {}).get(
+                            "reasoning_content"
+                        ),
+                    ),
+                    finish_reason=choice.get("finish_reason"),
+                )
+                for choice in chunk.get("choices", [])
+            ],
+        )
+
+    async def _check_response(self, response: httpx.Response) -> None:
+        if response.status_code != 200:
+            body_bytes: bytes = await response.aread()
+            logger.error(
+                "deepseek stream http error status=%s body=%s",
+                response.status_code,
+                body_bytes.decode()[:500],
+            )
+            raise ProviderError(
+                f"DeepSeek returned {response.status_code}: {body_bytes.decode()}"
+            )
 
     def _build_payload(
         self, request: ChatRequest, *, stream: bool

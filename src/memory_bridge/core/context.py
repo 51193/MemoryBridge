@@ -2,7 +2,7 @@
 
 import logging
 
-from .logging import structured_debug
+from ..logging import structured_debug
 
 logger: logging.Logger = logging.getLogger(__name__)
 

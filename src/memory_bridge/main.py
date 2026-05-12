@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from .api.dependencies import init_session_store
 from .api.middleware import TokenAuthMiddleware
 from .api.router import router
 from .config import Settings
@@ -32,6 +33,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         logger.warning("Authentication is DISABLED until tokens exist.")
 
+    init_session_store(settings.session_max_history)
+
     config: dict[str, object] = build_mem0_config(settings)
     app.state.memory_manager = MemoryManager(config)
     app.state.provider = DeepSeekProvider(
@@ -41,6 +44,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ProviderRegistry.register(settings.deepseek_model, app.state.provider)
     yield
     await app.state.provider.close()
+    app.state.memory_manager.close()
+    app.state.token_store.close()
 
 
 def create_app() -> FastAPI:

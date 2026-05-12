@@ -10,10 +10,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from ..core.context import ContextBuilder
-from ..core.logging import structured_debug, structured_info
 from ..core.memory import MemoryManager
 from ..core.session import SessionNotFoundError, SessionStore
-from ..exceptions import MemorySearchError, ProviderNotFoundError
+from ..exceptions import MemorySearchError, MemoryStoreError, ProviderNotFoundError
+from ..logging import structured_debug, structured_info
 from ..models.request import ChatRequest, Message, SessionCreateRequest
 from ..models.response import ChatResponse, SessionCreateResponse
 from ..providers.base import AbstractLLMProvider
@@ -104,7 +104,109 @@ def create_session(
     }
 
 
-# ── Chat Completions ────────────────────────────────────────────────────
+# ── Chat completions: decomposed helpers ─────────────────────────────────
+
+
+def _resolve_provider(model: str) -> AbstractLLMProvider:
+    try:
+        return ProviderRegistry.get(model)
+    except ProviderNotFoundError as e:
+        logger.warning("provider not found model=%s", model)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+def _resolve_session(
+    session_store: SessionStore, agent_id: str, session_id: str
+) -> list[dict[str, object]]:
+    try:
+        return session_store.get(agent_id, session_id)
+    except SessionNotFoundError as e:
+        logger.info(
+            "session not found → 404 agent=%s session=%s", agent_id, session_id
+        )
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+def _build_enriched_request(
+    request: ChatRequest,
+    session_history: list[dict[str, object]],
+    memory_manager: MemoryManager,
+    context_builder: ContextBuilder,
+) -> tuple[ChatRequest, int]:
+    message_dicts: list[dict[str, object]] = _messages_as_dicts(request.messages)
+    memories: list[dict[str, object]] = []
+
+    if request.memory_enabled:
+        try:
+            memories = memory_manager.search(
+                str(request.messages[-1].content),
+                user_id=request.agent_id,
+                limit=request.memory_limit,
+            )
+        except MemorySearchError as e:
+            logger.error("memory search failed → 500: %s", e)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    enriched: list[dict[str, object]] = context_builder.build(
+        message_dicts, memories
+    )
+    final_messages: list[dict[str, object]] = _inject_history(
+        enriched, session_history
+    )
+
+    structured_debug(
+        logger,
+        "context assembled",
+        memories_injected=len(memories),
+        history_injected=len(session_history),
+        final_messages=len(final_messages),
+    )
+
+    enriched_request: ChatRequest = request.model_copy(
+        update={"messages": _dicts_as_messages(final_messages)}
+    )
+    return enriched_request, len(memories)
+
+
+def _inject_history(
+    enriched: list[dict[str, object]],
+    history: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    if not history:
+        return list(enriched)
+
+    result: list[dict[str, object]] = []
+
+    for i, msg in enumerate(enriched):
+        if msg.get("role") == "system":
+            result.append(msg)
+            result.extend(history)
+            result.extend(enriched[i + 1 :])
+            return result
+
+    result.extend(history)
+    result.extend(enriched)
+    return result
+
+
+def _schedule_memory_store(
+    background_tasks: BackgroundTasks,
+    memory_manager: MemoryManager,
+    session_store: SessionStore,
+    request: ChatRequest,
+    response_content: str,
+) -> None:
+    background_tasks.add_task(
+        _store_memory,
+        memory_manager=memory_manager,
+        session_store=session_store,
+        request=request,
+        response_content=response_content,
+    )
+    structured_debug(logger, "background memory store scheduled")
+
+
+# ── Chat Completions (handler) ──────────────────────────────────────────
 
 
 @router.post("/v1/chat/completions", response_model=None)
@@ -128,57 +230,14 @@ async def chat_completions(
         memory=str(request.memory_enabled),
     )
 
-    provider: AbstractLLMProvider
-    try:
-        provider = ProviderRegistry.get(request.model)
-    except ProviderNotFoundError as e:
-        logger.warning("provider not found model=%s", request.model)
-        raise HTTPException(status_code=502, detail=str(e))
-
-    session_history: list[dict[str, object]]
-    try:
-        session_history = session_store.get(
-            request.agent_id, request.agent_session_id
-        )
-    except SessionNotFoundError as e:
-        logger.info("session not found → 404 agent=%s session=%s",
-                      request.agent_id, request.agent_session_id)
-        raise HTTPException(status_code=404, detail=str(e))
-
-    message_dicts: list[dict[str, object]] = _messages_as_dicts(request.messages)
-    memories_count: int = 0
-
-    enriched_messages: list[dict[str, object]]
-    if request.memory_enabled:
-        try:
-            memories: list[dict[str, object]] = memory_manager.search(
-                str(request.messages[-1].content),
-                user_id=request.agent_id,
-                limit=request.memory_limit,
-            )
-            memories_count = len(memories)
-        except MemorySearchError as e:
-            logger.error("memory search failed → 500: %s", e)
-            raise HTTPException(status_code=500, detail=str(e))
-
-        enriched_messages = context_builder.build(message_dicts, memories)
-    else:
-        enriched_messages = context_builder.build(message_dicts, [])
-
-    final_messages: list[dict[str, object]] = _inject_history(
-        enriched_messages, session_history
+    provider: AbstractLLMProvider = _resolve_provider(request.model)
+    session_history: list[dict[str, object]] = _resolve_session(
+        session_store, request.agent_id, request.agent_session_id
     )
 
-    structured_debug(
-        logger,
-        "context assembled",
-        memories_injected=memories_count,
-        history_injected=len(session_history),
-        final_messages=len(final_messages),
-    )
-
-    enriched_request: ChatRequest = request.model_copy(
-        update={"messages": _dicts_as_messages(final_messages)}
+    enriched_request: ChatRequest
+    enriched_request, _ = _build_enriched_request(
+        request, session_history, memory_manager, context_builder
     )
 
     if request.stream:
@@ -192,14 +251,10 @@ async def chat_completions(
         logger.error("provider call failed → 502: %s", e)
         raise HTTPException(status_code=502, detail=str(e))
 
-    background_tasks.add_task(
-        _store_memory,
-        memory_manager=memory_manager,
-        session_store=session_store,
-        request=request,
-        response_content=response.choices[0].message.content,
+    _schedule_memory_store(
+        background_tasks, memory_manager, session_store, request,
+        response.choices[0].message.content,
     )
-    structured_debug(logger, "background memory store scheduled")
 
     elapsed: float = (time.monotonic() - t0) * 1000
     structured_info(
@@ -212,25 +267,7 @@ async def chat_completions(
     return response
 
 
-def _inject_history(
-    enriched: list[dict[str, object]],
-    history: list[dict[str, object]],
-) -> list[dict[str, object]]:
-    if not history:
-        return list(enriched)
-
-    result: list[dict[str, object]] = []
-
-    for i, msg in enumerate(enriched):
-        if msg.get("role") == "system":
-            result.append(msg)
-            result.extend(history)
-            result.extend(enriched[i + 1 :])
-            return result
-
-    result.extend(history)
-    result.extend(enriched)
-    return result
+# ── Streaming handler ───────────────────────────────────────────────────
 
 
 def _handle_stream(
@@ -295,9 +332,14 @@ async def _store_memory(
     from ..core.prompts import load_prompt
 
     prompt: str | None = load_prompt(request.agent_id, prompts_dir)
-    memory_manager.add(
-        all_messages,
-        user_id=request.agent_id,
-        metadata={"session_id": request.agent_session_id},
-        prompt=prompt,
-    )
+    try:
+        memory_manager.add(
+            all_messages,
+            user_id=request.agent_id,
+            metadata={"session_id": request.agent_session_id},
+            prompt=prompt,
+        )
+    except MemoryStoreError:
+        logger.exception(
+            "background memory store failed agent=%s", request.agent_id
+        )
