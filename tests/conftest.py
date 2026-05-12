@@ -4,12 +4,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from memory_bridge.api.middleware import TokenAuthMiddleware
 from memory_bridge.api.router import router
 
 
 @pytest.fixture
 def client() -> TestClient:
     app: FastAPI = FastAPI(title="MemoryBridgeTest")
+    app.state.token_enabled = False
+    app.add_middleware(TokenAuthMiddleware)
     app.include_router(router)
     return TestClient(app)
 

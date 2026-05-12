@@ -43,6 +43,10 @@ def main() -> None:
             sys.exit(1)
         return
 
+    if len(sys.argv) > 1 and sys.argv[1] == "--init-token":
+        _run_init_token()
+        return
+
     settings: Settings = Settings()
     try:
         settings.validate_secrets()
@@ -86,6 +90,7 @@ def _run_setup() -> None:
             "MEMORY_BRIDGE_PORT=8000\n"
             "SESSION_MAX_HISTORY=50\n"
             "PROMPTS_DIR=prompts\n"
+            "TOKEN_DB_PATH=data/tokens.db\n"
         )
         print("Created .env template. Edit it to add your API keys.")
     else:
@@ -140,6 +145,18 @@ def _download_qdrant(qdrant_bin: Path) -> None:
 def _download_file(url: str, dest: Path) -> None:
     with urlopen(url) as resp:
         dest.write_bytes(resp.read())
+
+
+def _run_init_token() -> None:
+    """Generate initial API token."""
+    from .core.tokens import TokenStore
+
+    store: TokenStore = TokenStore(os.environ.get("TOKEN_DB_PATH", "data/tokens.db"))
+    token: str = store.create(label="admin")
+    print(f"Token: {token}")
+    print()
+    print("Use this token in your requests:")
+    print(f"  Authorization: Bearer {token}")
 
 
 def _run(settings: Settings) -> None:

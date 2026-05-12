@@ -32,6 +32,7 @@ def reset_state() -> None:
 
 def _make_app() -> FastAPI:
     app: FastAPI = FastAPI(title="MemoryBridgeTest")
+    app.state.token_enabled = False
 
     mock_mm: MagicMock = MagicMock(spec=MemoryManager)
     app.state.memory_manager = mock_mm

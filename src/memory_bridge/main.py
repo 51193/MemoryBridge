@@ -1,14 +1,19 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from .api.middleware import TokenAuthMiddleware
 from .api.router import router
 from .config import Settings
 from .core.logging import setup_logging
 from .core.memory import MemoryManager, build_mem0_config
+from .core.tokens import TokenStore
 from .providers.deepseek import DeepSeekProvider
 from .providers.registry import ProviderRegistry
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -16,6 +21,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging()
     settings: Settings = Settings()
     settings.validate_secrets()
+
+    token_store: TokenStore = TokenStore(settings.token_db_path)
+    app.state.token_store = token_store
+    app.state.token_enabled = token_store.is_initialized()
+    if not app.state.token_enabled:
+        logger.warning(
+            "Token system not initialized. "
+            "Run --init-token or scripts/token_admin.sh to create a token."
+        )
+        logger.warning("Authentication is DISABLED until tokens exist.")
+
     config: dict[str, object] = build_mem0_config(settings)
     app.state.memory_manager = MemoryManager(config)
     app.state.provider = DeepSeekProvider(
@@ -33,6 +49,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    app.add_middleware(TokenAuthMiddleware)
     app.include_router(router)
     return app
 

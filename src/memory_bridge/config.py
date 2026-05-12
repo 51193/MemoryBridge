@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     memory_bridge_port: int = 8000
     session_max_history: int = 50
     prompts_dir: str = "prompts"
+    token_db_path: str = "data/tokens.db"
 
     def validate_secrets(self) -> None:
         """Raise ValueError if any required secret is not configured."""

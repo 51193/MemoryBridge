@@ -483,18 +483,25 @@ MemoryBridge/
 │   ├── core/
 │   │   ├── memory.py        # MemoryManager (Mem0 封装)
 │   │   ├── session.py       # SessionStore (纯内存会话)
-│   │   └── context.py       # ContextBuilder (上下文注入)
+│   │   ├── context.py       # ContextBuilder (上下文注入)
+│   │   ├── tokens.py        # TokenStore (SQLite Token 管理)
+│   │   └── prompts.py       # 自定义记忆提取提示词加载
 │   │
 │   ├── providers/
 │   │   ├── base.py          # AbstractLLMProvider
 │   │   ├── deepseek.py      # DeepSeekProvider
 │   │   └── registry.py      # ProviderRegistry
 │   │
+│   ├── api/
+│   │   ├── router.py        # 路由: /health, /v1/sessions, /v1/chat/completions
+│   │   ├── dependencies.py  # FastAPI 依赖注入
+│   │   └── middleware.py    # TokenAuthMiddleware
+│   │
 │   └── models/
 │       ├── request.py       # ChatRequest, Message
 │       └── response.py      # ChatResponse, StreamChunk
 │
-├── tests/                   # 61 个测试用例
+├── tests/                   # 102 个测试用例
 ├── docs/                    # 本文档 + 开发计划
 ├── pyproject.toml           # 项目元数据 + 依赖 + 工具配置
 ├── .env.example             # 环境变量模板

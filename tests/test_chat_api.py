@@ -16,6 +16,7 @@ from memory_bridge.api.router import router
 from memory_bridge.core.context import ContextBuilder
 from memory_bridge.core.memory import MemoryManager
 from memory_bridge.core.session import SessionStore
+from memory_bridge.core.tokens import TokenStore
 from memory_bridge.exceptions import MemorySearchError
 from memory_bridge.models.request import Message
 from memory_bridge.models.response import (
@@ -44,8 +45,11 @@ def _make_app(
     memory_manager: MemoryManager | None = None,
     session_store: SessionStore | None = None,
     mock_provider: MagicMock | None = None,
+    token_enabled: bool = False,
 ) -> FastAPI:
     app: FastAPI = FastAPI(title="MemoryBridgeTest")
+    app.state.token_enabled = token_enabled
+    app.state.token_store = MagicMock(spec=TokenStore)
 
     if memory_manager is not None:
         app.state.memory_manager = memory_manager
@@ -59,6 +63,8 @@ def _make_app(
     if mock_provider is not None:
         ProviderRegistry.register("deepseek-chat", mock_provider)
 
+    from memory_bridge.api.middleware import TokenAuthMiddleware
+    app.add_middleware(TokenAuthMiddleware)
     app.include_router(router)
     return app
 
@@ -175,14 +181,66 @@ def _make_chat_app(
     memory_manager: MagicMock | None = None,
     session_store: SessionStore | None = None,
     mock_provider: MagicMock | None = None,
+    token_enabled: bool = False,
 ) -> TestClient:
     ss: SessionStore = session_store or SessionStore()
     mm: MagicMock = memory_manager or MagicMock(spec=MemoryManager)
     mp: MagicMock = mock_provider or MagicMock(spec=AbstractLLMProvider)
     app: FastAPI = _make_app(
-        memory_manager=mm, session_store=ss, mock_provider=mp
+        memory_manager=mm, session_store=ss, mock_provider=mp,
+        token_enabled=token_enabled,
     )
     return TestClient(app)
+
+
+class TestTokenAuth:
+    def test_missing_token_returns_401(self) -> None:
+        ss: SessionStore = SessionStore()
+        ss.create("agent-1", "sess-1")
+        mm: MagicMock = MagicMock(spec=MemoryManager)
+        app: FastAPI = _make_app(
+            memory_manager=mm, session_store=ss, token_enabled=True
+        )
+        app.state.token_store.validate.return_value = False
+        client: TestClient = TestClient(app)
+        response = client.post("/v1/chat/completions", json={
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "hello"}],
+            "agent_id": "agent-1",
+            "agent_session_id": "sess-1",
+        })
+        assert response.status_code == 401
+        assert response.json()["detail"] == "TOKEN_MISSING"
+
+    def test_invalid_token_returns_401(self) -> None:
+        ss: SessionStore = SessionStore()
+        ss.create("agent-1", "sess-1")
+        mm: MagicMock = MagicMock(spec=MemoryManager)
+        app: FastAPI = _make_app(
+            memory_manager=mm, session_store=ss, token_enabled=True
+        )
+        app.state.token_store.validate.return_value = False
+        client: TestClient = TestClient(app)
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": "hello"}],
+                "agent_id": "agent-1",
+                "agent_session_id": "sess-1",
+            },
+            headers={"Authorization": "Bearer invalid-token"},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"] == "TOKEN_INVALID"
+
+    def test_health_endpoint_bypasses_token(self) -> None:
+        mm: MagicMock = MagicMock(spec=MemoryManager)
+        app: FastAPI = _make_app(memory_manager=mm, token_enabled=True)
+        app.state.token_store.validate.return_value = False
+        client: TestClient = TestClient(app)
+        response = client.get("/health")
+        assert response.status_code == 200
 
 
 class TestChatCompletions:
