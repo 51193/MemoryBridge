@@ -2,7 +2,8 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags:
+      - 'v*'
 
 jobs:
   build:
@@ -35,11 +36,10 @@ jobs:
       - name: Generate checksum
         run: cd dist && sha256sum memorybridge.pyz > memorybridge.pyz.sha256
 
-      - name: Create release
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}
-          generate_release_notes: true
           files: |
             dist/memorybridge.pyz
             dist/memorybridge.pyz.sha256
+          generate_release_notes: true
