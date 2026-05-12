@@ -1,0 +1,17 @@
+# Build artifacts
+dist/
+*.pyz
+*.whl
+
+# Qdrant binary
+bin/qdrant
+
+# Runtime data
+data/
+*.db
+
+# Environment
+.env
+.venv/
+__pycache__/
+*.pyc
