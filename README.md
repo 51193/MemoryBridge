@@ -29,7 +29,7 @@ Agent ──(OpenAI API)──→ MemoryBridge ──(OpenAI API)──→ DeepS
 ### 1. 安装
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/51193/MemoryBridge
 cd MemoryBridge
 
 # 安装 uv 包管理器 (如已安装则可跳过)
@@ -72,7 +72,7 @@ curl http://localhost:8000/health
 
 ## 从 Release 安装
 
-从 [GitHub Releases](https://github.com/<user>/<repo>/releases) 下载 `memorybridge.pyz`。
+从 [GitHub Releases](https://github.com/51193/MemoryBridge/releases) 下载 `memorybridge.pyz`。
 
 ### 1. 下载
 
