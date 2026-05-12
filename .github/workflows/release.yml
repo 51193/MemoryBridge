@@ -20,6 +20,12 @@ jobs:
       - name: Set up Python
         run: uv python install 3.11
 
+      - name: Set version from tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Setting version to $VERSION"
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+
       - name: Install project dependencies
         run: uv sync --python 3.11
 

@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib.metadata import version as pkg_version
 
 from fastapi import FastAPI
 
@@ -49,9 +50,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    try:
+        ver: str = pkg_version("memory-bridge")
+    except Exception:
+        ver = "dev"
     app: FastAPI = FastAPI(
         title="MemoryBridge",
-        version="0.1.0",
+        version=ver,
         lifespan=lifespan,
     )
     app.add_middleware(TokenAuthMiddleware)
