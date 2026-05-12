@@ -244,7 +244,7 @@ def _start_bridge(settings: Settings) -> subprocess.Popen[bytes]:
 
     env: dict[str, str] = os.environ.copy()
     if sys.argv[0].endswith(".pyz"):
-        env["PYTHONPATH"] = str(Path(sys.argv[0]).resolve())
+        env["PYTHONPATH"] = ":".join(sys.path)
     else:
         env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent.parent)
 
