@@ -18,7 +18,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
 
       - name: Set up Python
-        run: uv python install 3.11
+        run: uv python install 3.13
 
       - name: Set version from tag
         run: |
@@ -27,14 +27,14 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
 
       - name: Install project dependencies
-        run: uv sync --python 3.11
+        run: uv sync --python 3.13
 
       - name: Build .pyz with shiv
         run: |
           mkdir -p dist
           uv pip install shiv
           uv run shiv \
-            --compressed \
+            --compile-pyc \
             --console-script host-manager \
             --output-file dist/memorybridge.pyz \
             .
