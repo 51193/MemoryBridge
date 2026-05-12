@@ -4,7 +4,7 @@ These test Pydantic request validation — all post-dependency.
 They use a test app with all required dependencies overridden.
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -33,6 +33,7 @@ def reset_state() -> None:
 def _make_app() -> FastAPI:
     app: FastAPI = FastAPI(title="MemoryBridgeTest")
     app.state.token_enabled = False
+    app.state.qdrant_health_url = "http://localhost:6333/healthz"
 
     mock_mm: MagicMock = MagicMock(spec=MemoryManager)
     app.state.memory_manager = mock_mm
@@ -57,7 +58,15 @@ def client() -> TestClient:
 
 class TestHealth:
     def test_health_returns_ok(self, client: TestClient) -> None:
-        response = client.get("/health")
+        mock_client: MagicMock = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_response: MagicMock = MagicMock()
+        mock_response.status_code = 200
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        with patch("memory_bridge.api.router.httpx.AsyncClient", return_value=mock_client):
+            response = client.get("/health")
         assert response.status_code == 200
         assert response.json() == {"status": "ok", "qdrant": "connected"}
 

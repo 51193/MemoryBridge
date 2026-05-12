@@ -1,7 +1,7 @@
 """Integration tests for chat completions and sessions API."""
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -50,6 +50,7 @@ def _make_app(
     app: FastAPI = FastAPI(title="MemoryBridgeTest")
     app.state.token_enabled = token_enabled
     app.state.token_store = MagicMock(spec=TokenStore)
+    app.state.qdrant_health_url = "http://localhost:6333/healthz"
 
     if memory_manager is not None:
         app.state.memory_manager = memory_manager
@@ -92,28 +93,30 @@ def _make_chat_response(
 
 class TestHealth:
     def test_health_with_connected_qdrant(self) -> None:
-        mock_mm: MagicMock = MagicMock(spec=MemoryManager)
-        mock_mm.search.return_value = [{"id": "1", "memory": "ok"}]
+        mock_client: MagicMock = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_response: MagicMock = MagicMock()
+        mock_response.status_code = 200
+        mock_client.get = AsyncMock(return_value=mock_response)
 
-        app: FastAPI = _make_app(
-            memory_manager=mock_mm,
-            session_store=SessionStore(),
-        )
-        client: TestClient = TestClient(app)
-        response = client.get("/health")
+        with patch("memory_bridge.api.router.httpx.AsyncClient", return_value=mock_client):
+            app: FastAPI = _make_app(session_store=SessionStore())
+            client: TestClient = TestClient(app)
+            response = client.get("/health")
         assert response.status_code == 200
         assert response.json() == {"status": "ok", "qdrant": "connected"}
 
     def test_health_with_disconnected_qdrant(self) -> None:
-        mock_mm: MagicMock = MagicMock(spec=MemoryManager)
-        mock_mm.search.side_effect = MemorySearchError("down")
+        mock_client: MagicMock = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(side_effect=Exception("connection refused"))
 
-        app: FastAPI = _make_app(
-            memory_manager=mock_mm,
-            session_store=SessionStore(),
-        )
-        client: TestClient = TestClient(app)
-        response = client.get("/health")
+        with patch("memory_bridge.api.router.httpx.AsyncClient", return_value=mock_client):
+            app: FastAPI = _make_app(session_store=SessionStore())
+            client: TestClient = TestClient(app)
+            response = client.get("/health")
         assert response.status_code == 200
         assert response.json() == {"status": "ok", "qdrant": "disconnected"}
 
@@ -235,8 +238,7 @@ class TestTokenAuth:
         assert response.json()["detail"] == "TOKEN_INVALID"
 
     def test_health_endpoint_bypasses_token(self) -> None:
-        mm: MagicMock = MagicMock(spec=MemoryManager)
-        app: FastAPI = _make_app(memory_manager=mm, token_enabled=True)
+        app: FastAPI = _make_app(token_enabled=True)
         app.state.token_store.validate.return_value = False
         client: TestClient = TestClient(app)
         response = client.get("/health")
