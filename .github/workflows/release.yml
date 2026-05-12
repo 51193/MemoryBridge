@@ -32,7 +32,7 @@ jobs:
       - name: Build .pyz with shiv
         run: |
           mkdir -p dist
-          uv run python -m pip install shiv
+          uv pip install shiv
           uv run shiv \
             --compressed \
             --console-script host-manager \
