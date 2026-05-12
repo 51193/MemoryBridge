@@ -6,6 +6,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Literal, cast
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
@@ -46,10 +47,11 @@ def _dicts_as_messages(dicts: list[dict[str, object]]) -> list[Message]:
 
 @router.get("/health")
 async def health(request: Request) -> dict[str, str]:
-    memory_manager: MemoryManager = get_memory_manager(request)
+    qdrant_health_url: str = request.app.state.qdrant_health_url
     try:
-        memory_manager.search("health_check", user_id="system", limit=1)
-        qdrant_status: str = "connected"
+        async with httpx.AsyncClient() as client:
+            r: httpx.Response = await client.get(qdrant_health_url, timeout=2.0)
+        qdrant_status: str = "connected" if r.status_code == 200 else "disconnected"
     except Exception:
         qdrant_status = "disconnected"
     return {"status": "ok", "qdrant": qdrant_status}

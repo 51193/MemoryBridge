@@ -42,6 +42,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         api_key=settings.deepseek_api_key,
         base_url=settings.deepseek_base_url,
     )
+    app.state.qdrant_health_url = (
+        f"http://{settings.qdrant_host}:{settings.qdrant_port}/healthz"
+    )
     ProviderRegistry.register(settings.deepseek_model, app.state.provider)
     yield
     await app.state.provider.close()
