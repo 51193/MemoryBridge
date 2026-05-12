@@ -231,13 +231,21 @@ def _start_qdrant(
     return proc
 
 
+def _read_stderr(proc: subprocess.Popen[bytes]) -> str:
+    if proc.stderr is None:
+        return ""
+    return proc.stderr.read().decode("utf-8", errors="replace").strip()
+
+
 def _start_bridge(settings: Settings) -> subprocess.Popen[bytes]:
     health_url: str = (
         f"http://{settings.memory_bridge_host}:{settings.memory_bridge_port}/health"
     )
 
     env: dict[str, str] = os.environ.copy()
-    if not sys.argv[0].endswith(".pyz"):
+    if sys.argv[0].endswith(".pyz"):
+        env["PYTHONPATH"] = str(Path(sys.argv[0]).resolve())
+    else:
         env["PYTHONPATH"] = str(Path(__file__).resolve().parent.parent.parent)
 
     proc: subprocess.Popen[bytes] = subprocess.Popen(
@@ -252,12 +260,19 @@ def _start_bridge(settings: Settings) -> subprocess.Popen[bytes]:
             str(settings.memory_bridge_port),
         ],
         env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
     logger.info("starting MemoryBridge on %s ...", health_url)
     for _ in range(BRIDGE_STARTUP_TIMEOUT):
+        if proc.poll() is not None:
+            stderr_text: str = _read_stderr(proc)
+            _shutdown_qdrant()
+            raise HostManagerError(
+                f"MemoryBridge exited prematurely (code={proc.returncode}). "
+                + (f"stderr: {stderr_text}" if stderr_text else "no stderr output")
+            )
         try:
             r: httpx.Response = httpx.get(health_url, timeout=1.0)
             if r.status_code == 200:
@@ -266,8 +281,13 @@ def _start_bridge(settings: Settings) -> subprocess.Popen[bytes]:
             pass
         time.sleep(1.0)
     else:
+        stderr_text = _read_stderr(proc)
+        proc.kill()
         _shutdown_qdrant()
-        raise HostManagerError("MemoryBridge failed to start within timeout")
+        raise HostManagerError(
+            "MemoryBridge failed to start within timeout. "
+            + (f"stderr: {stderr_text}" if stderr_text else "no stderr output")
+        )
 
     logger.info("MemoryBridge started pid=%s", proc.pid)
     return proc
