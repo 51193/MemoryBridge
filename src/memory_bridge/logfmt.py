@@ -4,6 +4,8 @@ These are at package root so all layers (core, providers, api) can import them
 without creating upward dependencies between packages.
 """
 
+from __future__ import annotations
+
 import logging
 
 

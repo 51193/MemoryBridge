@@ -88,12 +88,14 @@ Docker 引入额外的守护进程、镜像管理和网络命名空间开销。Q
 ┌─────────────────────────────────────────────────────────────┐
 │ 步骤 3: 会话管理 (SessionStore)                               │
 │                                                             │
-│ agent_session_id 为空 → 自动生成 12 位 hex UUID              │
+│ agent_session_id 必填（ChatRequest 强制 min_length=1）        │
 │                                                             │
 │ 从 SessionStore 获取当前会话的消息历史：                       │
 │   key = (agent_id, session_id)                              │
 │   value = deque of messages (maxlen=50)                     │
 │                                                             │
+│ system 消息不进入 session：仅 user/assistant/tool 被存储        │
+│ system prompt 由 ContextBuilder 每轮构建                       │
 │ SessionStore 是纯内存结构，进程重启后丢失                      │
 └──────────────────┬──────────────────────────────────────────┘
                    ▼
@@ -153,12 +155,12 @@ Docker 引入额外的守护进程、镜像管理和网络命名空间开销。Q
 │ 步骤 7: 异步记忆存储 (BackgroundTasks)                        │
 │                                                             │
 │ 非流式：在返回响应前提交 BackgroundTask                        │
-│ 流式：无法获取完整响应文本，当前版本不存储流式对话记忆            │
+│ 流式：收集完整响应文本后直接调用 _store_memory()                 │
 │                                                             │
 │ 存储内容：                                                    │
-│   - 将原始请求消息 + 助手回复拼接为完整对话                     │
+│   - 原始请求消息 + 助手回复拼接为完整对话                       │
+│   - 过滤 system 角色消息后存入 SessionStore                    │
 │   - Mem0.add(messages, user_id=agent_id)                    │
-│   - 同时更新 SessionStore                                    │
 │                                                             │
 │ Mem0 内部流程：                                               │
 │   对话消息 → Mem0 LLM 提取事实 → Embedding 向量化              │
@@ -295,19 +297,28 @@ _sessions: dict[tuple[str, str], deque[dict]] = {}
 
 - **双重隔离**：`(agent_id, session_id)` 复合键确保不同 Agent、同一 Agent 的不同会话之间完全隔离
 - **固定容量**：最多保留 50 条消息，超出时自动淘汰最早的消息
-- **进程生命周期**：进程重启后所有会话数据丢失——这是有意设计，因为长期记忆由 Mem0 承载，会话仅用于近期上下文窗口
+- **角色过滤**：`system` 角色消息在存储时自动过滤，仅 `user`、`assistant`、`tool` 进入 session deque。系统提示词由 ContextBuilder 每轮构建，不持久化到会话历史中
+- **进程生命周期**：进程重启后所有会话数据丢失——长期记忆由 Mem0 承载，会话历史可通过 `GET /v1/sessions/` 导出并在重启后通过 `POST /v1/sessions` 恢复
 - **零依赖**：不依赖 Redis、数据库等外部存储
 
 ### 5.2 会话生命周期
 
 ```
-Agent 首次请求 (无 session_id)
-  → 自动生成 session_id (12位hex UUID)
-  → 创建空会话
+Agent 首次请求
+  → 通过 POST /v1/sessions 创建会话（可携带 initial_messages）
+  → auto-generated session_id (12位hex UUID) 或指定
 
 后续请求 (携带相同 session_id)
-  → 追加消息到已有会话
+  → 追加 user/assistant 消息到已有会话（system 被过滤）
   → 检索该会话的近期上下文
+
+Session 导出 (GET /v1/sessions/{agent_id}/{session_id})
+  → 返回完整会话消息列表（user/assistant/tool，不含 system）
+  → Agent 可将消息持久化到外部存储
+
+Session 恢复 (POST /v1/sessions)
+  → 进程重启后，Agent 将持久化的消息作为 initial_messages 传入
+  → 恢复完整的多轮对话上下文（session 不存在则创建，已存在则 409）
 
 Agent 显式清除或进程重启
   → 会话数据被清除
@@ -318,11 +329,28 @@ Agent 显式清除或进程重启
 
 ## 六、上下文注入
 
-### 6.1 ContextBuilder 原理
+### 6.1 完整消息组装流程
 
-ContextBuilder 负责将检索到的长期记忆注入到当前对话的 System Prompt 中。
+MemoryBridge 按以下顺序组装最终发给 LLM 的消息列表：
 
-**注入模板：**
+```
+1. 记忆注入 (ContextBuilder)
+   → 检索到的长期记忆拼接到 system prompt 前端
+   → 如当前消息无 system → 创建新的 system 消息
+   → 如当前消息有 system → 在原 content 前拼接记忆模板
+
+2. 会话历史注入 (_inject_history)
+   → system 消息（含记忆）放在最前面
+   → 其后插入 session 存储的全部历史消息（无 system，纯对话）
+   → 最后放当前 request 中的非 system 消息
+
+最终结构：
+  [system: 记忆模板 + 自定义提示词]
+  [user/assistant: 历史消息 1...N]    ← 从 SessionStore 注入
+  [user/assistant: 当前请求消息...]   ← 原始请求（system 已移除）
+```
+
+### 6.2 注入模板
 
 ```
 [相关历史记忆]
@@ -334,27 +362,7 @@ ContextBuilder 负责将检索到的长期记忆注入到当前对话的 System 
 {原始 system prompt 或留空}
 ```
 
-**注入策略详述：**
-
-```
-情况 A: 已有 system message
-  输入: [system: "你是助手", user: "你好"]
-  输出: [system: "[相关历史记忆]\n- ...\n\n[当前对话]\n你是助手", user: "你好"]
-
-情况 B: 无 system message
-  输入: [user: "你好"]
-  输出: [system: "[相关历史记忆]\n- ...", user: "你好"]
-
-情况 C: 无相关记忆
-  输入: [system: "你是助手", user: "你好"]
-  输出: [system: "[相关历史记忆]\n\n[当前对话]\n你是助手", user: "你好"]
-  记忆部分为空，但结构仍然保留
-
-情况 D: memory_enabled = False
-  等同于情况 C，记忆部分为空
-```
-
-### 6.2 为什么注入 System Prompt？
+### 6.3 为什么注入 System Prompt？
 
 - System Prompt 是 LLM 处理对话时最先看到的上下文，优先级最高
 - 将记忆放在这里确保 LLM 在生成回复时能参考这些信息

@@ -14,9 +14,9 @@ from ..core.context import ContextBuilder
 from ..core.memory import MemoryManager
 from ..core.session import SessionNotFoundError, SessionStore
 from ..exceptions import MemorySearchError, MemoryStoreError, ProviderNotFoundError
-from ..logging import structured_debug, structured_info
+from ..logfmt import structured_debug, structured_info
 from ..models.request import ChatRequest, Message, SessionCreateRequest
-from ..models.response import ChatResponse, SessionCreateResponse
+from ..models.response import ChatResponse, SessionCreateResponse, SessionExportResponse
 from ..providers.base import AbstractLLMProvider
 from ..providers.registry import ProviderRegistry
 from .dependencies import get_context_builder, get_memory_manager, get_session_store
@@ -70,7 +70,6 @@ def create_session(
     session_store: SessionStore = Depends(get_session_store),
 ) -> dict[str, object]:
     session_id: str = req.agent_session_id or uuid.uuid4().hex[:12]
-    initial_count: int = len(req.initial_messages) if req.initial_messages else 0
 
     from ..core.session import SessionExistsError
 
@@ -92,17 +91,37 @@ def create_session(
         )
         raise HTTPException(status_code=409, detail=str(e))
 
+    stored_count: int = len(session_store.get(req.agent_id, session_id))
     structured_info(
         logger,
         "→ POST /v1/sessions → 201",
         agent_id=req.agent_id,
         session_id=session_id,
-        initial_messages=initial_count,
+        initial_messages=stored_count,
     )
     return {
         "agent_id": req.agent_id,
         "agent_session_id": session_id,
-        "message_count": initial_count,
+        "message_count": stored_count,
+    }
+
+
+@router.get(
+    "/v1/sessions/{agent_id}/{session_id}",
+    response_model=SessionExportResponse,
+)
+def get_session(
+    agent_id: str,
+    session_id: str,
+    session_store: SessionStore = Depends(get_session_store),
+) -> dict[str, object]:
+    history: list[dict[str, object]] = _resolve_session(
+        session_store, agent_id, session_id
+    )
+    return {
+        "agent_id": agent_id,
+        "agent_session_id": session_id,
+        "messages": _dicts_as_messages(history),
     }
 
 

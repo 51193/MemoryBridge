@@ -57,35 +57,56 @@ python tests/integration/smoke_test.py --base-url http://10.0.0.1:8000
 | 8 | 创建 `agent-other/sess-iso` | 201 |
 | 9 | `agent-other` 问"我喜欢什么颜色和动物？"（memory_enabled=true） | 响应**不含**"蓝"和"猫" |
 
-### Phase D — 边界条件
+### Phase D — Session 导出与恢复（Export/Import Round-trip）
+
+验证会话历史的导出和重新导入能力，支持进程重启后恢复对话上下文。
 
 | 步骤 | 操作 | 预期 |
 |------|------|------|
-| 10 | 不带 `agent_session_id` | 422 |
-| 11 | 不存在的 session_id | 404, `SESSION_NOT_FOUND` |
-| 12 | 重复创建相同 session | 409, `SESSION_EXISTS` |
-| 13 | 思考模式 + 流式（`thinking_enabled=true, stream=true`） | SSE 事件流，含 `reasoning_content` + `[DONE]` |
+| 10 | 创建 `sess-export-src`，附初始消息 `{"role":"user","content":"你好，我叫小刚"}` | 201, message_count=2 |
+| 11 | 同一 Session 发送"回复一个字：好"（`memory_enabled=false`） | 200，响应含"好" |
+| 12 | `GET /v1/sessions/agent-smoke/sess-export-src` 导出会话 | 200，messages >= 4 条 |
+| 13 | `POST /v1/sessions` 以导出的 messages 创建新 Session `sess-export-dst` | 201, message_count=导出条数 |
+| 14 | 新 Session 发送"我叫什么名字？请只回答名字"（`memory_enabled=false`） | 响应含"小刚" |
+
+**原理**：导出再重建的 Session 应有完整的历史上下文，`memory_enabled=false` 确保回答来自 SessionStore 而非长期记忆。
+
+### Phase E — 边界条件
+
+| 步骤 | 操作 | 预期 |
+|------|------|------|
+| 15 | 不带 `agent_session_id` | 422 |
+| 16 | 不存在的 session_id | 404, `SESSION_NOT_FOUND` |
+| 17 | 重复创建相同 session | 409, `SESSION_EXISTS` |
+| 18 | 思考模式 + 流式（`thinking_enabled=true, stream=true`） | SSE 事件流，含 `reasoning_content` + `[DONE]` |
+| 19 | 导出不存在的 session | 404, `SESSION_NOT_FOUND` |
 
 ## 成功输出
 
 ```
-[1/13] CREATE session st... 201 ✓ (message_count=2)
-[2/13] CHAT short-term memory... 200 ✓ (contains '小明')
-[3/13] CREATE session lt... 201 ✓
-[4/13] CHAT write long-term facts... 200 ✓
-[5/13] SLEEP 3s...
+[1/19] CREATE session st... 201 ✓ (message_count=2)
+[2/19] CHAT short-term memory... 200 ✓ (contains '小明')
+[3/19] CREATE session lt... 201 ✓
+[4/19] CHAT write long-term facts... 200 ✓
+[5/19] SLEEP 3s...
        slept 3s ✓
-[6/13] CREATE session lt-verify... 201 ✓
-[7/13] CHAT verify long-term memory... 200 ✓ (contains '蓝'+'猫')
-[8/13] CREATE session other agent... 201 ✓
-[9/13] CHAT verify isolation... 200 ✓ (no '蓝'/'猫')
-[10/13] VALIDATE missing session_id... 422 ✓
-[11/13] VALIDATE unknown session... 404 ✓
-[12/13] VALIDATE duplicate session... 409 ✓
-[13/13] CHAT thinking+stream... 200 ✓ (SSE+reasoning)
+[6/19] CREATE session lt-verify... 201 ✓
+[7/19] CHAT verify long-term memory... 200 ✓ (contains '蓝'+'猫')
+[8/19] CREATE session other agent... 201 ✓
+[9/19] CHAT verify isolation... 200 ✓ (no '蓝'/'猫')
+[10/19] CREATE session export-src... 201 ✓
+[11/19] CHAT one turn in export-src... 200 ✓
+[12/19] EXPORT session... 200 ✓ (system not in exported)
+[13/19] IMPORT session... 201 ✓
+[14/19] CHAT verify restored session... 200 ✓ (contains '小刚')
+[15/19] VALIDATE missing session_id... 422 ✓
+[16/19] VALIDATE unknown session... 404 ✓
+[17/19] VALIDATE duplicate session... 409 ✓
+[18/19] CHAT thinking+stream... 200 ✓ (SSE+reasoning)
+[19/19] Health check... 200 ✓
 
 ==================================================
-ALL PASSED: 21/21
+ALL PASSED: 27/27
 ```
 
 ## DEBUG 日志对照

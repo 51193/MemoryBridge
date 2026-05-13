@@ -10,7 +10,7 @@ from typing import Any, Literal, cast
 import httpx
 
 from ..exceptions import MemoryBridgeError
-from ..logging import structured_debug, structured_info
+from ..logfmt import structured_debug, structured_info
 from ..models.request import ChatRequest, Message
 from ..models.response import (
     ChatResponse,

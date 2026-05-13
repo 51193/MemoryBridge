@@ -7,7 +7,7 @@ from mem0 import Memory
 
 from ..config import Settings
 from ..exceptions import MemorySearchError, MemoryStoreError
-from ..logging import structured_debug
+from ..logfmt import structured_debug
 
 logger: logging.Logger = logging.getLogger(__name__)
 

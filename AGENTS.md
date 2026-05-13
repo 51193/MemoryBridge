@@ -27,7 +27,6 @@ MemoryBridge 是 Agent 与大模型之间的中间件，负责记忆检索、上
 | `README.md` | 项目介绍、快速开始、API 使用方式 |
 | `docs/ARCHITECTURE.md` | 系统架构、请求链路、各子系统原理 |
 | `docs/INTEGRATION_TEST.md` | 集成冒烟测试步骤、预期输出、清理方法 |
-| `docs/DEVELOPMENT_PLAN.md` | 原始开发计划（历史参考） |
 | `AGENTS.md` | 本文档 — 开发准则与工程约束 |
 
 ### 测试命令速查

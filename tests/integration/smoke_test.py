@@ -35,7 +35,7 @@ QUIET: bool = False
 PASSED: int = 0
 FAILED: int = 0
 STEP: int = 0
-TOTAL: int = 17
+TOTAL: int = 19
 
 AGENT: str = "agent-smoke"
 AGENT_OTHER: str = "agent-other"
@@ -205,6 +205,63 @@ def phase_c() -> None:
     check_not_contains(content, "猫", "agent isolation (no '猫')")
 
 
+# ── Phase E: Session export → import round-trip ─────────────────────────
+
+
+def phase_e() -> None:
+    step("CREATE session export-src")
+    r = _req("POST", "/v1/sessions", {
+        "agent_id": AGENT,
+        "agent_session_id": "sess-export-src",
+        "initial_messages": [
+            {"role": "user", "content": "你好，我叫小刚"},
+            {"role": "assistant", "content": "你好小刚！"},
+        ],
+    })
+    check(r["_status"] == 201, "status=201")
+
+    step("CHAT one turn in export-src (memory_enabled=false)")
+    r = _req("POST", "/v1/chat/completions", {
+        "model": MODEL,
+        "messages": [{"role": "user", "content": "回复一个字：好"}],
+        "agent_id": AGENT,
+        "agent_session_id": "sess-export-src",
+        "memory_enabled": False,
+    })
+    check(r["_status"] == 200, "status=200")
+
+    step("EXPORT session sess-export-src")
+    r = _req("GET", "/v1/sessions/agent-smoke/sess-export-src")
+    check(r["_status"] == 200, "status=200")
+    exported: list[dict[str, object]] = r.get("messages", [])
+    log(f"       exported {len(exported)} messages")
+    check(len(exported) >= 2, f"session has >= 2 messages (got {len(exported)})")
+    roles: list[str] = [str(m.get("role", "")) for m in exported]
+    check("system" not in roles, "no system role in exported messages")
+
+    step("IMPORT session via POST /v1/sessions (restore)")
+    r = _req("POST", "/v1/sessions", {
+        "agent_id": AGENT,
+        "agent_session_id": "sess-export-dst",
+        "initial_messages": exported,
+    })
+    check(r["_status"] == 201, "status=201")
+    check(r.get("message_count") == len(exported), f"message_count={len(exported)}")
+
+    step("CHAT verify restored session has history (memory_enabled=false)")
+    r = _req("POST", "/v1/chat/completions", {
+        "model": MODEL,
+        "messages": [{"role": "user", "content": "我叫什么名字？请只回答名字"}],
+        "agent_id": AGENT,
+        "agent_session_id": "sess-export-dst",
+        "memory_enabled": False,
+    })
+    check(r["_status"] == 200, "status=200")
+    content = r.get("choices", [{}])[0].get("message", {}).get("content", "")
+    log(f"       LLM response: {content[:120]}")
+    check_contains(content, "小刚", "restored session contains '小刚' (export→import round-trip)")
+
+
 # ── Phase D: Edge cases ────────────────────────────────────────────────
 
 
@@ -335,6 +392,7 @@ def main() -> None:
         phase_a()
         phase_b()
         phase_c()
+        phase_e()
         phase_d()
     except SystemExit:
         raise

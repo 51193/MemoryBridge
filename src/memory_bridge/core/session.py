@@ -1,11 +1,23 @@
-"""Session store — pure in-memory conversation history management."""
+"""Session store — pure in-memory conversation history management.
+
+System messages are filtered out on write — only user, assistant, and tool
+messages are persisted in the session deque. The system prompt is injected by
+ContextBuilder at the top of each request, never stored in history.
+"""
 
 import logging
 from collections import deque
 
-from ..logging import structured_debug, structured_info
+from ..logfmt import structured_debug, structured_info
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+_SESSION_ROLES: frozenset[str] = frozenset({"user", "assistant", "tool"})
+
+
+def _filter_system(messages: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Return messages with system-role entries removed."""
+    return [m for m in messages if m.get("role") in _SESSION_ROLES]
 
 
 class SessionExistsError(Exception):
@@ -21,6 +33,7 @@ class SessionStore:
 
     Sessions are keyed by (agent_id, session_id) tuples.
     Each session holds at most max_history messages.
+    System messages are filtered on write — only user/assistant/tool are stored.
     All data is lost on process restart.
     """
 
@@ -51,8 +64,9 @@ class SessionStore:
         )
         msg_count: int = 0
         if messages:
-            dq.extend(messages)
-            msg_count = len(messages)
+            filtered: list[dict[str, object]] = _filter_system(messages)
+            dq.extend(filtered)
+            msg_count = len(filtered)
         self._sessions[key] = dq
         structured_info(
             logger,
@@ -104,13 +118,14 @@ class SessionStore:
         key: tuple[str, str] = (agent_id, session_id)
         if key not in self._sessions:
             self._sessions[key] = deque[dict[str, object]](maxlen=self._max_history)
-        self._sessions[key].extend(messages)
+        filtered: list[dict[str, object]] = _filter_system(messages)
+        self._sessions[key].extend(filtered)
         structured_debug(
             logger,
             "session appended",
             agent_id=agent_id,
             session_id=session_id,
-            added=len(messages),
+            added=len(filtered),
             total=len(self._sessions[key]),
         )
 

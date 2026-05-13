@@ -176,6 +176,64 @@ class TestSessions:
         history: list[dict[str, object]] = session_store.get("agent-1", "sess-1")
         assert len(history) == 2
 
+    def test_create_session_filters_system(self) -> None:
+        session_store: SessionStore = SessionStore()
+        app: FastAPI = _make_app(session_store=session_store)
+        client: TestClient = TestClient(app)
+        response = client.post("/v1/sessions", json={
+            "agent_id": "agent-1",
+            "agent_session_id": "sess-1",
+            "initial_messages": [
+                {"role": "system", "content": "sys"},
+                {"role": "user", "content": "hello"},
+            ],
+        })
+        assert response.status_code == 201
+        assert response.json()["message_count"] == 1
+        history: list[dict[str, object]] = session_store.get("agent-1", "sess-1")
+        assert len(history) == 1
+        assert history[0]["role"] == "user"
+
+    def test_get_session_returns_history(self) -> None:
+        session_store: SessionStore = SessionStore()
+        session_store.create("agent-1", "sess-1", messages=[
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+        ])
+        app: FastAPI = _make_app(session_store=session_store)
+        client: TestClient = TestClient(app)
+        response = client.get("/v1/sessions/agent-1/sess-1")
+        assert response.status_code == 200
+        body: dict[str, Any] = response.json()
+        assert body["agent_id"] == "agent-1"
+        assert body["agent_session_id"] == "sess-1"
+        assert len(body["messages"]) == 2
+        assert body["messages"][0]["role"] == "user"
+        assert body["messages"][0]["content"] == "q1"
+
+    def test_get_session_returns_404(self) -> None:
+        app: FastAPI = _make_app(session_store=SessionStore())
+        client: TestClient = TestClient(app)
+        response = client.get("/v1/sessions/agent-1/nonexistent")
+        assert response.status_code == 404
+        assert "SESSION_NOT_FOUND" in response.json()["detail"]
+
+    def test_get_session_excludes_system(self) -> None:
+        session_store: SessionStore = SessionStore()
+        session_store.create("agent-1", "sess-1", messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "system", "content": "sys2"},
+        ])
+        app: FastAPI = _make_app(session_store=session_store)
+        client: TestClient = TestClient(app)
+        response = client.get("/v1/sessions/agent-1/sess-1")
+        assert response.status_code == 200
+        msgs: list[dict[str, Any]] = response.json()["messages"]
+        assert len(msgs) == 2
+        assert all(m["role"] != "system" for m in msgs)
+
 
 # ── Chat Completions ────────────────────────────────────────────────────
 

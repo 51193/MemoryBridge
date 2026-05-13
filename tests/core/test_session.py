@@ -6,7 +6,35 @@ from memory_bridge.core.session import (
     SessionExistsError,
     SessionNotFoundError,
     SessionStore,
+    _filter_system,
 )
+
+
+class TestFilterSystem:
+    def test_filters_system_messages(self) -> None:
+        messages: list[dict[str, object]] = [
+            {"role": "system", "content": "you are a helper"},
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "hi"},
+        ]
+        result: list[dict[str, object]] = _filter_system(messages)
+        assert len(result) == 2
+        assert all(m["role"] != "system" for m in result)
+
+    def test_preserves_tool_messages(self) -> None:
+        messages: list[dict[str, object]] = [
+            {"role": "tool", "content": "result", "tool_call_id": "t1"},
+        ]
+        result: list[dict[str, object]] = _filter_system(messages)
+        assert len(result) == 1
+
+    def test_returns_empty_for_all_system(self) -> None:
+        messages: list[dict[str, object]] = [
+            {"role": "system", "content": "a"},
+            {"role": "system", "content": "b"},
+        ]
+        result: list[dict[str, object]] = _filter_system(messages)
+        assert result == []
 
 
 class TestSessionStore:
@@ -122,3 +150,25 @@ class TestSessionStore:
         history: list[dict[str, object]] = store.get("agent-1", "sess-1")
         assert len(history) == 3
         assert history[0]["content"] == "m2"
+
+    def test_create_filters_system(self) -> None:
+        store: SessionStore = SessionStore()
+        store.create("agent-1", "sess-1", messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hello"},
+        ])
+        history: list[dict[str, object]] = store.get("agent-1", "sess-1")
+        assert len(history) == 1
+        assert history[0]["role"] == "user"
+        assert history[0]["content"] == "hello"
+
+    def test_append_filters_system(self) -> None:
+        store: SessionStore = SessionStore()
+        store.create("agent-1", "sess-1")
+        store.append("agent-1", "sess-1", [
+            {"role": "system", "content": "sys"},
+            {"role": "assistant", "content": "ok"},
+        ])
+        history: list[dict[str, object]] = store.get("agent-1", "sess-1")
+        assert len(history) == 1
+        assert history[0]["role"] == "assistant"
