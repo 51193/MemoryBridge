@@ -48,7 +48,7 @@ class ContextBuilder:
             if msg.get("role") == "system":
                 original_content: str = str(msg.get("content", ""))
                 enriched: dict[str, object] = dict(msg)
-                enriched["content"] = memory_block + original_content
+                enriched["content"] = original_content + memory_block
                 result: list[dict[str, object]] = list(messages)
                 result[i] = enriched
                 structured_debug(
