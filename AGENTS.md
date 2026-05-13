@@ -169,7 +169,7 @@ uv run pytest
 - 启动时自动解压，运行时零额外 I/O
 - 不改变任何代码，不需要 Docker
 - 目标服务器只需有 Python 3.11+，无需安装依赖
-- 文件大小可控（本项目依赖少，预计 ~15-20MB）
+- 文件大小可控（本项目依赖少，预计 ~40MB）
 
 **不用 Docker**：用户明确要求避免引入 Docker 复杂度。
 
@@ -180,10 +180,16 @@ uv run pytest
 ## 打包流程
 
 ```bash
-# 开发机上构建
+# 本地构建（含 lint + typecheck + test）
+bash scripts/build.sh
+
+# 或仅构建（跳过检查）
+bash scripts/build.sh --build
+
+# 开发机上手动构建
 uv run shiv \
-    --compressed \
-    --console-script host_manager \
+    --compile-pyc \
+    --console-script host-manager \
     --output-file dist/memorybridge.pyz \
     .
 

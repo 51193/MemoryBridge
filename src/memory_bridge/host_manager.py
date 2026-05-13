@@ -179,10 +179,20 @@ def _run(settings: Settings) -> None:
         logger.info("all processes started, running")
         while True:
             if _qdrant_proc is not None and _qdrant_proc.poll() is not None:
-                logger.error("Qdrant exited unexpectedly")
+                stderr_text: str = _read_stderr(_qdrant_proc)
+                logger.error(
+                    "Qdrant exited unexpectedly code=%s stderr=%s",
+                    _qdrant_proc.returncode,
+                    stderr_text or "<none>",
+                )
                 break
             if _bridge_proc is not None and _bridge_proc.poll() is not None:
-                logger.error("MemoryBridge exited unexpectedly")
+                stderr_text = _read_stderr(_bridge_proc)
+                logger.error(
+                    "MemoryBridge exited unexpectedly code=%s stderr=%s",
+                    _bridge_proc.returncode,
+                    stderr_text or "<none>",
+                )
                 break
             time.sleep(1.0)
     finally:
@@ -209,13 +219,19 @@ def _start_qdrant(
     proc: subprocess.Popen[bytes] = subprocess.Popen(
         [str(qdrant_bin)],
         env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
 
     health_url: str = f"http://{settings.qdrant_host}:{settings.qdrant_port}/healthz"
     logger.info("starting Qdrant on %s ...", health_url)
     for _ in range(QDRANT_STARTUP_TIMEOUT):
+        if proc.poll() is not None:
+            stderr_text: str = _read_stderr(proc)
+            raise HostManagerError(
+                f"Qdrant exited prematurely (code={proc.returncode}). "
+                + (f"stderr: {stderr_text}" if stderr_text else "no stderr output")
+            )
         try:
             r: httpx.Response = httpx.get(health_url, timeout=1.0)
             if r.status_code == 200:
@@ -224,8 +240,12 @@ def _start_qdrant(
             pass
         time.sleep(1.0)
     else:
+        stderr_text = _read_stderr(proc)
         proc.kill()
-        raise HostManagerError("Qdrant failed to start within timeout")
+        raise HostManagerError(
+            "Qdrant failed to start within timeout. "
+            + (f"stderr: {stderr_text}" if stderr_text else "no stderr output")
+        )
 
     logger.info("Qdrant started pid=%s", proc.pid)
     return proc

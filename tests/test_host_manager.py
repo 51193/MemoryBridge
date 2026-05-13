@@ -39,6 +39,7 @@ class TestStartQdrant:
         mock_proc: MagicMock = MagicMock(spec=subprocess.Popen)
         mock_proc.poll.return_value = None
         mock_proc.pid = 12345
+        mock_proc.stderr = None
 
         with (
             patch("memory_bridge.host_manager.subprocess.Popen", return_value=mock_proc),
@@ -64,6 +65,7 @@ class TestStartQdrant:
 
         mock_proc: MagicMock = MagicMock(spec=subprocess.Popen)
         mock_proc.poll.return_value = None
+        mock_proc.stderr = None
 
         with (
             patch(
@@ -93,6 +95,7 @@ class TestStartQdrant:
         mock_proc: MagicMock = MagicMock(spec=subprocess.Popen)
         mock_proc.poll.return_value = None
         mock_proc.pid = 12345
+        mock_proc.stderr = None
 
         mock_popen: MagicMock
         mock_get: MagicMock
