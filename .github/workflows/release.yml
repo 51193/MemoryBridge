@@ -17,30 +17,12 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Set up Python
-        run: uv python install 3.13
-
-      - name: Set version from tag
+      - name: Install Python + inject version + build
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "Setting version to $VERSION"
-          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
-
-      - name: Install project dependencies
-        run: uv sync --python 3.13
-
-      - name: Build .pyz with shiv
-        run: |
-          mkdir -p dist
-          uv pip install shiv
-          uv run shiv \
-            --compile-pyc \
-            --console-script host-manager \
-            --output-file dist/memorybridge.pyz \
-            .
-
-      - name: Generate checksum
-        run: cd dist && sha256sum memorybridge.pyz > memorybridge.pyz.sha256
+          AUTO_INSTALL_PYTHON=true \
+          PYTHON_VERSION=3.13 \
+          bash scripts/build.sh --build --version "$VERSION"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

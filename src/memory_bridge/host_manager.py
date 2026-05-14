@@ -35,6 +35,14 @@ class HostManagerError(Exception):
 def main() -> None:
     setup_logging()
 
+    if len(sys.argv) > 1 and sys.argv[1] == "--version":
+        try:
+            from importlib.metadata import version
+            print(version("memory-bridge"))
+        except Exception:
+            print("dev")
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] == "--setup":
         try:
             _run_setup()

@@ -19,17 +19,8 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: uv sync --extra dev --python ${{ matrix.python-version }}
-
-      - name: Run mypy
-        run: uv run mypy src/
-
-      - name: Run ruff
-        run: uv run ruff check src/ tests/
-
-      - name: Run tests
-        run: uv run pytest -v
+      - name: Install Python + deps + mypy + ruff + pytest
+        run: |
+          AUTO_INSTALL_PYTHON=true \
+          PYTHON_VERSION=${{ matrix.python-version }} \
+          bash scripts/build.sh --check

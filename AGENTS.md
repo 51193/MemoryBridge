@@ -179,14 +179,38 @@ uv run pytest
 
 ## 打包流程
 
+本地和 CI 走**同一条脚本** `scripts/build.sh`。
+
+| 场景 | 命令 |
+|------|------|
+| 本地 full build | `bash scripts/build.sh` |
+| 本地仅检查 | `bash scripts/build.sh --check` |
+| 本地仅构建 | `bash scripts/build.sh --build` |
+| 本地构建+版本 | `bash scripts/build.sh --build --version 1.2.3` |
+| 本地构建+冒烟 | `bash scripts/build.sh --run` |
+| **CI test.yml** | `AUTO_INSTALL_PYTHON=true PYTHON_VERSION=$V bash scripts/build.sh --check` |
+| **CI release.yml** | `AUTO_INSTALL_PYTHON=true PYTHON_VERSION=3.13 bash scripts/build.sh --build --version $V` |
+
 ```bash
-# 本地构建（含 lint + typecheck + test）
+# 本地构建（含 deps → lint + typecheck + test → build）
 bash scripts/build.sh
 
-# 或仅构建（跳过检查）
+# 仅检查（lint + typecheck + test，不构建）
+bash scripts/build.sh --check
+
+# 仅构建（跳过检查）
 bash scripts/build.sh --build
 
-# 开发机上手动构建
+# 构建并注入版本号（与 CI release 行为一致）
+bash scripts/build.sh --build --version 1.2.3
+
+# 构建并启动冒烟测试
+bash scripts/build.sh --run
+
+# 查看帮助
+bash scripts/build.sh --help
+
+# 开发机上手动构建（等价于 --build，但跳过 deps）
 uv run shiv \
     --compile-pyc \
     --console-script host-manager \
@@ -199,6 +223,7 @@ scp dist/memorybridge.pyz server:/opt/memorybridge/
 # 服务器上（首次）
 cd /opt/memorybridge
 python memorybridge.pyz --setup    # 下载 qdrant 二进制、创建 data 目录
+python memorybridge.pyz --version  # 查看版本
 
 # 每次启动
 python memorybridge.pyz

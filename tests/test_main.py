@@ -154,3 +154,4 @@ class TestLifespan:
 
         mock_components["provider"].close.assert_called_once()
         assert "memory_manager" in close_order
+
