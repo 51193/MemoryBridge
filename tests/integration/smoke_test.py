@@ -29,7 +29,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_URL: str = "http://localhost:8000"
-MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 PROMPTS_DIR: str = os.getenv("PROMPTS_DIR", "prompts")
 QUIET: bool = False
 PASSED: int = 0
@@ -116,8 +115,7 @@ def phase_a() -> None:
 
     step("CHAT short-term memory (memory_enabled=false)")
     r = _req("POST", "/v1/chat/completions", {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": "我叫什么名字？"}],
+            "messages": [{"role": "user", "content": "我叫什么名字？"}],
         "agent_id": AGENT,
         "agent_session_id": "sess-st",
         "memory_enabled": False,
@@ -140,8 +138,7 @@ def phase_b() -> None:
 
     step("CHAT write long-term facts")
     r = _req("POST", "/v1/chat/completions", {
-        "model": MODEL,
-        "messages": [{
+            "messages": [{
             "role": "user",
             "content": "我最喜欢的颜色是蓝色，最喜欢的动物是猫"
         }],
@@ -166,8 +163,7 @@ def phase_b() -> None:
 
     step("CHAT verify long-term memory (new session, no history)")
     r = _req("POST", "/v1/chat/completions", {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": "请回忆我喜欢什么颜色和动物？"}],
+            "messages": [{"role": "user", "content": "请回忆我喜欢什么颜色和动物？"}],
         "agent_id": AGENT,
         "agent_session_id": "sess-lt-verify",
         "memory_enabled": True,
@@ -192,8 +188,7 @@ def phase_c() -> None:
 
     step("CHAT verify agent isolation")
     r = _req("POST", "/v1/chat/completions", {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": "请回忆我喜欢什么颜色和动物？"}],
+            "messages": [{"role": "user", "content": "请回忆我喜欢什么颜色和动物？"}],
         "agent_id": AGENT_OTHER,
         "agent_session_id": "sess-iso",
         "memory_enabled": True,
@@ -222,8 +217,7 @@ def phase_e() -> None:
 
     step("CHAT one turn in export-src (memory_enabled=false)")
     r = _req("POST", "/v1/chat/completions", {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": "回复一个字：好"}],
+            "messages": [{"role": "user", "content": "回复一个字：好"}],
         "agent_id": AGENT,
         "agent_session_id": "sess-export-src",
         "memory_enabled": False,
@@ -250,8 +244,7 @@ def phase_e() -> None:
 
     step("CHAT verify restored session has history (memory_enabled=false)")
     r = _req("POST", "/v1/chat/completions", {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": "我叫什么名字？请只回答名字"}],
+            "messages": [{"role": "user", "content": "我叫什么名字？请只回答名字"}],
         "agent_id": AGENT,
         "agent_session_id": "sess-export-dst",
         "memory_enabled": False,
@@ -268,16 +261,14 @@ def phase_e() -> None:
 def phase_d() -> None:
     step("VALIDATE missing agent_session_id → 422")
     r = _req("POST", "/v1/chat/completions", {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": "hi"}],
+            "messages": [{"role": "user", "content": "hi"}],
         "agent_id": AGENT,
     })
     check(r["_status"] == 422, "status=422")
 
     step("VALIDATE unknown session → 404")
     r = _req("POST", "/v1/chat/completions", {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": "hi"}],
+            "messages": [{"role": "user", "content": "hi"}],
         "agent_id": AGENT,
         "agent_session_id": "nonexistent-session-id",
     })
@@ -298,13 +289,10 @@ def phase_d() -> None:
 
     step("CHAT thinking + stream")
     body_str: str = _sse_body("/v1/chat/completions", {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": "1+1等于几？"}],
+            "messages": [{"role": "user", "content": "1+1等于几？"}],
         "agent_id": AGENT,
         "agent_session_id": "sess-lt",
         "stream": True,
-        "thinking_enabled": True,
-        "reasoning_effort": "high",
         "memory_enabled": False,
     })
     check("data:" in body_str, "stream has SSE data: prefix")
@@ -327,8 +315,7 @@ def phase_d() -> None:
         "agent_session_id": "sess-prompt",
     })
     r = _req("POST", "/v1/chat/completions", {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": "我喜欢Python，我养了一只叫旺财的狗"}],
+            "messages": [{"role": "user", "content": "我喜欢Python，我养了一只叫旺财的狗"}],
         "agent_id": AGENT,
         "agent_session_id": "sess-prompt",
         "memory_enabled": True,
@@ -345,8 +332,7 @@ def phase_d() -> None:
 
     step("CHAT verify custom prompt extraction")
     r = _req("POST", "/v1/chat/completions", {
-        "model": MODEL,
-        "messages": [{"role": "user", "content": "我有什么宠物？叫什么？我有什么编程偏好？"}],
+            "messages": [{"role": "user", "content": "我有什么宠物？叫什么？我有什么编程偏好？"}],
         "agent_id": AGENT,
         "agent_session_id": "sess-lt",       # reuse existing session
         "memory_enabled": True,

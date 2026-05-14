@@ -76,7 +76,6 @@ class TestHealth:
 class TestChatCompletionsValidation:
     def test_missing_agent_id_returns_422(self, client: TestClient) -> None:
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_session_id": "sess-1",
         })
@@ -84,7 +83,6 @@ class TestChatCompletionsValidation:
 
     def test_missing_session_id_returns_422(self, client: TestClient) -> None:
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
         })
@@ -92,7 +90,6 @@ class TestChatCompletionsValidation:
 
     def test_empty_messages_returns_422(self, client: TestClient) -> None:
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -101,7 +98,6 @@ class TestChatCompletionsValidation:
 
     def test_empty_agent_id_returns_422(self, client: TestClient) -> None:
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "",
             "agent_session_id": "sess-1",
@@ -110,7 +106,6 @@ class TestChatCompletionsValidation:
 
     def test_empty_session_id_returns_422(self, client: TestClient) -> None:
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "",
@@ -119,7 +114,6 @@ class TestChatCompletionsValidation:
 
     def test_memory_limit_out_of_range_returns_422(self, client: TestClient) -> None:
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -129,7 +123,6 @@ class TestChatCompletionsValidation:
 
     def test_invalid_role_returns_422(self, client: TestClient) -> None:
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "invalid", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",

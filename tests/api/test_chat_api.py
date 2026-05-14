@@ -66,6 +66,8 @@ def _make_app(
     if mock_provider is not None:
         ProviderRegistry.register("deepseek-chat", mock_provider)
 
+    app.state.model = "deepseek-chat"
+
     from memory_bridge.api.middleware import TokenAuthMiddleware
     app.add_middleware(TokenAuthMiddleware)
     app.include_router(router)
@@ -272,7 +274,6 @@ class TestTokenAuth:
         app.state.token_store.validate.return_value = False
         client: TestClient = TestClient(app)
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -292,7 +293,6 @@ class TestTokenAuth:
         response = client.post(
             "/v1/chat/completions",
             json={
-                "model": "deepseek-chat",
                 "messages": [{"role": "user", "content": "hello"}],
                 "agent_id": "agent-1",
                 "agent_session_id": "sess-1",
@@ -320,7 +320,6 @@ class TestChatCompletions:
         )
         client: TestClient = TestClient(app)
         response = client.post("/v1/chat/completions", json={
-            "model": "unknown-model",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -330,7 +329,6 @@ class TestChatCompletions:
     def test_session_not_found_returns_404(self) -> None:
         client: TestClient = _make_chat_app()
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "nonexistent",
@@ -349,7 +347,6 @@ class TestChatCompletions:
             memory_manager=mock_mm, session_store=ss
         )
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -369,7 +366,6 @@ class TestChatCompletions:
             memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
         )
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -388,7 +384,6 @@ class TestChatCompletions:
             session_store=ss, mock_provider=mock_provider
         )
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -412,7 +407,6 @@ class TestChatCompletions:
             memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
         )
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -438,7 +432,6 @@ class TestChatCompletions:
             session_store=ss, mock_provider=mock_provider
         )
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "current"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -481,7 +474,6 @@ class TestChatCompletions:
             session_store=ss, mock_provider=mock_provider
         )
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -498,7 +490,6 @@ class TestChatCompletions:
         ss: SessionStore = SessionStore()
         client: TestClient = _make_chat_app(session_store=ss)
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
         })
@@ -517,7 +508,6 @@ class TestChatCompletions:
             memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
         )
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -549,7 +539,6 @@ class TestChatCompletions:
             memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
         )
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -576,7 +565,6 @@ class TestChatCompletions:
             memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
         )
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -600,7 +588,6 @@ class TestChatCompletions:
             memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
         )
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -630,7 +617,6 @@ class TestChatCompletions:
             memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
         )
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -653,7 +639,6 @@ class TestChatCompletions:
             memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
         )
         response = client.post("/v1/chat/completions", json={
-            "model": "deepseek-chat",
             "messages": [{"role": "user", "content": "hello"}],
             "agent_id": "agent-1",
             "agent_session_id": "sess-1",
@@ -680,7 +665,6 @@ class TestChatCompletions:
         response = client.post(
             "/v1/chat/completions",
             json={
-                "model": "deepseek-chat",
                 "messages": [{"role": "user", "content": "hello"}],
                 "agent_id": "agent-1",
                 "agent_session_id": "sess-1",

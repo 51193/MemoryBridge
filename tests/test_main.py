@@ -18,6 +18,8 @@ def mock_settings() -> Generator[MagicMock, None, None]:
         settings.token_db_path = "data/test_tokens.db"
         settings.deepseek_model = "deepseek-chat"
         settings.deepseek_base_url = "https://api.deepseek.com"
+        settings.deepseek_thinking_enabled = False
+        settings.deepseek_reasoning_effort = None
         settings.qdrant_host = "localhost"
         settings.qdrant_port = 6333
         settings.session_max_history = 50

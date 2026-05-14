@@ -32,9 +32,19 @@ class ProviderError(MemoryBridgeError):
 class DeepSeekProvider(AbstractLLMProvider):
     """DeepSeek API provider using OpenAI-compatible chat completions."""
 
-    def __init__(self, api_key: str, base_url: str) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str,
+        model: str,
+        thinking_enabled: bool = False,
+        reasoning_effort: str | None = None,
+    ) -> None:
         self._api_key: str = api_key
         self._base_url: str = base_url.rstrip("/")
+        self._model: str = model
+        self._thinking_enabled: bool = thinking_enabled
+        self._reasoning_effort: str | None = reasoning_effort
         self._client: httpx.AsyncClient = httpx.AsyncClient(
             base_url=self._base_url,
             headers={
@@ -51,9 +61,9 @@ class DeepSeekProvider(AbstractLLMProvider):
         structured_info(
             logger,
             "→ deepseek non-stream",
-            model=request.model,
+            model=self._model,
             messages_count=len(request.messages),
-            thinking=str(request.thinking_enabled),
+            thinking=str(self._thinking_enabled),
         )
         try:
             response: httpx.Response = await self._client.post(url, json=payload)
@@ -90,7 +100,7 @@ class DeepSeekProvider(AbstractLLMProvider):
         url: str = "/v1/chat/completions"
         payload: dict[str, object] = self._build_payload(request, stream=True)
         request_id: str = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-        model: str = request.model
+        model: str = self._model
         created: int = int(time.time())
         chunk_count: int = 0
         total_content_len: int = 0
@@ -98,7 +108,7 @@ class DeepSeekProvider(AbstractLLMProvider):
         structured_info(
             logger,
             "→ deepseek stream",
-            model=request.model,
+            model=self._model,
             messages_count=len(request.messages),
         )
         try:
@@ -168,17 +178,17 @@ class DeepSeekProvider(AbstractLLMProvider):
         self, request: ChatRequest, *, stream: bool
     ) -> dict[str, object]:
         payload: dict[str, object] = {
-            "model": request.model,
+            "model": self._model,
             "messages": [
                 {"role": m.role, "content": m.content} for m in request.messages
             ],
             "stream": stream,
         }
 
-        if request.thinking_enabled:
+        if self._thinking_enabled:
             payload["thinking"] = {"type": "enabled"}
-            if request.reasoning_effort is not None:
-                payload["reasoning_effort"] = request.reasoning_effort
+            if self._reasoning_effort is not None:
+                payload["reasoning_effort"] = self._reasoning_effort
         else:
             payload["temperature"] = request.temperature
             if request.top_p != 1.0:
@@ -192,11 +202,11 @@ class DeepSeekProvider(AbstractLLMProvider):
         structured_debug(
             logger,
             "deepseek payload built",
-            model=request.model,
+            model=self._model,
             stream=str(stream),
             temperature=str(payload.get("temperature", "N/A")),
             max_tokens=str(payload.get("max_tokens", "N/A")),
-            thinking=str(request.thinking_enabled),
+            thinking=str(self._thinking_enabled),
         )
         return payload
 

@@ -17,6 +17,8 @@ class TestSettings:
         assert settings.dashscope_api_key == ""
         assert settings.deepseek_base_url == "https://api.deepseek.com"
         assert settings.deepseek_model == "deepseek-chat"
+        assert settings.deepseek_thinking_enabled is False
+        assert settings.deepseek_reasoning_effort is None
         assert settings.embedding_model == "text-embedding-v4"
         assert settings.embedding_dims == 1024
         assert settings.qdrant_host == "localhost"

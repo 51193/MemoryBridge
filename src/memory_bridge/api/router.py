@@ -129,11 +129,11 @@ async def get_session(
 # ── Chat completions: decomposed helpers ─────────────────────────────────
 
 
-def _resolve_provider(model: str) -> AbstractLLMProvider:
+def _resolve_provider() -> AbstractLLMProvider:
     try:
-        return ProviderRegistry.get(model)
+        return ProviderRegistry.get_default()
     except ProviderNotFoundError as e:
-        logger.warning("provider not found model=%s", model)
+        logger.warning("no provider registered")
         raise HTTPException(status_code=502, detail=str(e))
 
 
@@ -234,12 +234,12 @@ async def chat_completions(
         "→ POST /v1/chat/completions",
         agent_id=request.agent_id,
         session_id=request.agent_session_id,
-        model=request.model,
+        model=fastapi_request.app.state.model,
         stream=str(request.stream),
         memory=str(request.memory_enabled),
     )
 
-    provider: AbstractLLMProvider = _resolve_provider(request.model)
+    provider: AbstractLLMProvider = _resolve_provider()
     session_history: list[dict[str, object]] = _resolve_session(
         session_store, request.agent_id, request.agent_session_id
     )

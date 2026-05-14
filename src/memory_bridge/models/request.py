@@ -13,16 +13,12 @@ class Message(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    model: str
     messages: list[Message] = Field(min_length=1)
     temperature: float = 0.7
     max_tokens: int | None = None
     top_p: float = 1.0
     stream: bool = False
     stop: list[str] | None = None
-
-    thinking_enabled: bool = False
-    reasoning_effort: Literal["high", "max"] | None = None
 
     agent_id: str = Field(min_length=1)
     agent_session_id: str = Field(min_length=1)

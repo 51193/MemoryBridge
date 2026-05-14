@@ -29,6 +29,17 @@ class ProviderRegistry:
         return cls._providers[model]
 
     @classmethod
+    def get_default(cls) -> AbstractLLMProvider:
+        """Return the single registered provider.
+
+        Raises:
+            ProviderNotFoundError: If no provider has been registered.
+        """
+        if not cls._providers:
+            raise ProviderNotFoundError("No provider registered")
+        return next(iter(cls._providers.values()))
+
+    @classmethod
     def reset(cls) -> None:
         """Clear all registered providers (for testing)."""
         cls._providers.clear()

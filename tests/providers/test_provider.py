@@ -20,7 +20,6 @@ from memory_bridge.providers.registry import ProviderRegistry
 
 def _make_request(**kwargs: Any) -> ChatRequest:
     defaults: dict[str, Any] = {
-        "model": "deepseek-chat",
         "messages": [{"role": "user", "content": "hello"}],
         "agent_id": "agent-1",
         "agent_session_id": "sess-1",
@@ -38,6 +37,16 @@ class TestProviderRegistry:
         ProviderRegistry.register("deepseek-chat", mock_provider)
         assert ProviderRegistry.get("deepseek-chat") is mock_provider
 
+    def test_get_default(self) -> None:
+        mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
+        ProviderRegistry.register("deepseek-chat", mock_provider)
+        assert ProviderRegistry.get_default() is mock_provider
+
+    def test_get_default_raises_when_empty(self) -> None:
+        ProviderRegistry.reset()
+        with pytest.raises(ProviderNotFoundError, match="No provider registered"):
+            ProviderRegistry.get_default()
+
     def test_get_unregistered_raises(self) -> None:
         with pytest.raises(ProviderNotFoundError, match="unknown-model"):
             ProviderRegistry.get("unknown-model")
@@ -54,7 +63,7 @@ class TestDeepSeekProvider:
     @pytest.fixture
     async def provider(self) -> DeepSeekProvider:  # type: ignore[misc]  # noqa: PT004
         p: DeepSeekProvider = DeepSeekProvider(
-            api_key="sk-test", base_url="https://api.deepseek.com"
+            api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat"
         )
         yield p
         await p.close()
@@ -88,7 +97,7 @@ class TestDeepSeekProvider:
             return_value=mock_client,
         ):
             provider: DeepSeekProvider = DeepSeekProvider(
-                api_key="sk-test", base_url="https://api.deepseek.com"
+                api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat"
             )
             try:
                 request: ChatRequest = _make_request()
@@ -113,7 +122,7 @@ class TestDeepSeekProvider:
             return_value=mock_client,
         ):
             provider: DeepSeekProvider = DeepSeekProvider(
-                api_key="sk-test", base_url="https://api.deepseek.com"
+                api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat"
             )
             try:
                 with pytest.raises(ProviderError, match="DeepSeek returned 500"):
@@ -131,7 +140,7 @@ class TestDeepSeekProvider:
             return_value=mock_client,
         ):
             provider: DeepSeekProvider = DeepSeekProvider(
-                api_key="sk-test", base_url="https://api.deepseek.com"
+                api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat"
             )
             try:
                 with pytest.raises(ProviderError, match="DeepSeek request failed"):
@@ -183,7 +192,7 @@ class TestDeepSeekProvider:
             return_value=mock_client,
         ):
             provider: DeepSeekProvider = DeepSeekProvider(
-                api_key="sk-test", base_url="https://api.deepseek.com"
+                api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat"
             )
             try:
                 collected: list[StreamChunk] = []
@@ -199,7 +208,7 @@ class TestDeepSeekProvider:
 
     def test_build_payload_includes_optional_fields(self) -> None:
         provider: DeepSeekProvider = DeepSeekProvider(
-            api_key="sk-test", base_url="https://api.deepseek.com"
+            api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat"
         )
         request: ChatRequest = _make_request(
             max_tokens=100,
@@ -213,7 +222,7 @@ class TestDeepSeekProvider:
 
     def test_build_payload_excludes_defaults(self) -> None:
         provider: DeepSeekProvider = DeepSeekProvider(
-            api_key="sk-test", base_url="https://api.deepseek.com"
+            api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat"
         )
         request: ChatRequest = _make_request()
         payload: dict[str, object] = provider._build_payload(request, stream=False)
@@ -221,12 +230,10 @@ class TestDeepSeekProvider:
 
     def test_build_payload_thinking_enabled(self) -> None:
         provider: DeepSeekProvider = DeepSeekProvider(
-            api_key="sk-test", base_url="https://api.deepseek.com"
+            api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat",
+            thinking_enabled=True, reasoning_effort="max",
         )
-        request: ChatRequest = _make_request(
-            thinking_enabled=True,
-            reasoning_effort="max",
-        )
+        request: ChatRequest = _make_request()
         payload: dict[str, object] = provider._build_payload(request, stream=False)
         assert payload["thinking"] == {"type": "enabled"}
         assert payload["reasoning_effort"] == "max"
@@ -235,9 +242,10 @@ class TestDeepSeekProvider:
 
     def test_build_payload_thinking_enabled_default_effort(self) -> None:
         provider: DeepSeekProvider = DeepSeekProvider(
-            api_key="sk-test", base_url="https://api.deepseek.com"
+            api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat",
+            thinking_enabled=True,
         )
-        request: ChatRequest = _make_request(thinking_enabled=True)
+        request: ChatRequest = _make_request()
         payload: dict[str, object] = provider._build_payload(request, stream=False)
         assert payload["thinking"] == {"type": "enabled"}
         assert "reasoning_effort" not in payload
@@ -245,7 +253,7 @@ class TestDeepSeekProvider:
 
     def test_parse_response_with_reasoning_content(self) -> None:
         provider: DeepSeekProvider = DeepSeekProvider(
-            api_key="sk-test", base_url="https://api.deepseek.com"
+            api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat"
         )
         data: dict[str, Any] = {
             "id": "r1",
@@ -269,7 +277,7 @@ class TestDeepSeekProvider:
 
     def test_parse_response_without_reasoning_content(self) -> None:
         provider: DeepSeekProvider = DeepSeekProvider(
-            api_key="sk-test", base_url="https://api.deepseek.com"
+            api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat"
         )
         data: dict[str, Any] = {
             "id": "r1",
@@ -307,7 +315,7 @@ class TestDeepSeekProvider:
             return_value=mock_client,
         ):
             provider: DeepSeekProvider = DeepSeekProvider(
-                api_key="sk-test", base_url="https://api.deepseek.com"
+                api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat"
             )
             try:
                 with pytest.raises(ProviderError, match="DeepSeek returned 429"):
@@ -328,7 +336,7 @@ class TestDeepSeekProvider:
             return_value=mock_client,
         ):
             provider: DeepSeekProvider = DeepSeekProvider(
-                api_key="sk-test", base_url="https://api.deepseek.com"
+                api_key="sk-test", base_url="https://api.deepseek.com", model="deepseek-chat"
             )
             await provider.close()
 

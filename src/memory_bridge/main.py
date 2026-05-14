@@ -44,7 +44,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.provider = DeepSeekProvider(
         api_key=settings.deepseek_api_key,
         base_url=settings.deepseek_base_url,
+        model=settings.deepseek_model,
+        thinking_enabled=settings.deepseek_thinking_enabled,
+        reasoning_effort=settings.deepseek_reasoning_effort,
     )
+    app.state.model = settings.deepseek_model
     app.state.qdrant_health_url = (
         f"http://{settings.qdrant_host}:{settings.qdrant_port}/healthz"
     )
