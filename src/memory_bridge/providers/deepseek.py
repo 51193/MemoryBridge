@@ -7,8 +7,6 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Literal, cast
 
-import httpx
-
 from ..exceptions import MemoryBridgeError
 from ..logfmt import structured_debug, structured_info
 from ..models.request import ChatRequest, Message
@@ -21,41 +19,36 @@ from ..models.response import (
     Usage,
 )
 from .base import AbstractLLMProvider
+from .deepseek_client import DeepSeekHttpClient
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-class ProviderError(MemoryBridgeError):
-    """Raised when an LLM provider call fails."""
+class DeepSeekProviderError(MemoryBridgeError):
+    """Raised when a DeepSeek provider call fails."""
 
 
 class DeepSeekProvider(AbstractLLMProvider):
-    """DeepSeek API provider using OpenAI-compatible chat completions."""
+    """DeepSeek API provider using OpenAI-compatible chat completions.
+
+    Accepts an injected DeepSeekHttpClient for I/O — this class is
+    purely responsible for payload construction and response parsing.
+    """
 
     def __init__(
         self,
-        api_key: str,
-        base_url: str,
+        client: DeepSeekHttpClient,
         model: str,
         thinking_enabled: bool = False,
         reasoning_effort: str | None = None,
     ) -> None:
-        self._api_key: str = api_key
-        self._base_url: str = base_url.rstrip("/")
+        self._client: DeepSeekHttpClient = client
         self._model: str = model
         self._thinking_enabled: bool = thinking_enabled
         self._reasoning_effort: str | None = reasoning_effort
-        self._client: httpx.AsyncClient = httpx.AsyncClient(
-            base_url=self._base_url,
-            headers={
-                "Authorization": f"Bearer {self._api_key}",
-                "Content-Type": "application/json",
-            },
-            timeout=httpx.Timeout(120.0),
-        )
 
     async def chat(self, request: ChatRequest) -> ChatResponse:
-        url: str = "/v1/chat/completions"
+        endpoint: str = "/v1/chat/completions"
         payload: dict[str, object] = self._build_payload(request, stream=False)
 
         structured_info(
@@ -66,20 +59,10 @@ class DeepSeekProvider(AbstractLLMProvider):
             thinking=str(self._thinking_enabled),
         )
         try:
-            response: httpx.Response = await self._client.post(url, json=payload)
-            if response.status_code != 200:
-                logger.error(
-                    "deepseek http error status=%s body=%s",
-                    response.status_code,
-                    response.text[:500],
-                )
-                raise ProviderError(
-                    f"DeepSeek returned {response.status_code}: {response.text}"
-                )
-            result: dict[str, Any] = response.json()
-        except httpx.RequestError as e:
-            logger.error("deepseek request error: %s", e)
-            raise ProviderError(f"DeepSeek request failed: {e}") from e
+            result: dict[str, object] = await self._client.post_json(endpoint, payload)
+        except Exception as e:
+            logger.error("deepseek provider error: %s", e)
+            raise DeepSeekProviderError(f"DeepSeek provider failed: {e}") from e
 
         parsed: ChatResponse = self._parse_response(result)
         usage_str: str = ""
@@ -97,7 +80,7 @@ class DeepSeekProvider(AbstractLLMProvider):
         return parsed
 
     async def chat_stream(self, request: ChatRequest) -> AsyncIterator[StreamChunk]:
-        url: str = "/v1/chat/completions"
+        endpoint: str = "/v1/chat/completions"
         payload: dict[str, object] = self._build_payload(request, stream=True)
         request_id: str = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         model: str = self._model
@@ -112,8 +95,7 @@ class DeepSeekProvider(AbstractLLMProvider):
             messages_count=len(request.messages),
         )
         try:
-            async with self._client.stream("POST", url, json=payload) as response:
-                await self._check_response(response)
+            async with self._client.stream(endpoint, payload) as response:
                 async for line in response.aiter_lines():
                     if not line.startswith("data: ") or line[6:] == "[DONE]":
                         if line[6:] == "[DONE]":
@@ -127,9 +109,10 @@ class DeepSeekProvider(AbstractLLMProvider):
                     yield self._build_stream_chunk(
                         request_id, created, model, chunk
                     )
-        except httpx.RequestError as e:
-            logger.error("deepseek stream error: %s", e)
-            raise ProviderError(f"DeepSeek stream request failed: {e}") from e
+        except MemoryBridgeError as e:
+            raise DeepSeekProviderError(f"DeepSeek stream failed: {e}") from e
+        except Exception as e:
+            raise DeepSeekProviderError(f"DeepSeek stream failed: {e}") from e
 
         structured_info(
             logger,
@@ -161,18 +144,6 @@ class DeepSeekProvider(AbstractLLMProvider):
                 for choice in chunk.get("choices", [])
             ],
         )
-
-    async def _check_response(self, response: httpx.Response) -> None:
-        if response.status_code != 200:
-            body_bytes: bytes = await response.aread()
-            logger.error(
-                "deepseek stream http error status=%s body=%s",
-                response.status_code,
-                body_bytes.decode()[:500],
-            )
-            raise ProviderError(
-                f"DeepSeek returned {response.status_code}: {body_bytes.decode()}"
-            )
 
     def _build_payload(
         self, request: ChatRequest, *, stream: bool
@@ -247,4 +218,4 @@ class DeepSeekProvider(AbstractLLMProvider):
         )
 
     async def close(self) -> None:
-        await self._client.aclose()
+        await self._client.close()

@@ -55,14 +55,14 @@ class TestBuildMem0Config:
         assert config["vector_store"]["config"]["embedding_model_dims"] == 768
         assert config["vector_store"]["config"]["on_disk"] is True
 
-    def test_validates_secrets(self) -> None:
+    def test_builds_config_with_valid_settings(self) -> None:
         settings: Settings = Settings(
-            deepseek_api_key="",
-            dashscope_api_key="",
+            deepseek_api_key="sk-test",
+            dashscope_api_key="sk-test",
             _env_file=None,
         )  # type: ignore[call-arg]
-        with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-            build_mem0_config(settings)
+        config: dict[str, object] = build_mem0_config(settings)
+        assert config["llm"]["provider"] == "deepseek"
 
 
 class TestMemoryManager:

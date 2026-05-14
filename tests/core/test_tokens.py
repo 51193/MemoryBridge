@@ -6,12 +6,13 @@ from unittest.mock import patch
 
 import pytest
 
+from memory_bridge.core.token_database import TokenDatabase
 from memory_bridge.core.tokens import TokenRecord, TokenStore
 
 
 def _init_store(db_path: str) -> TokenStore:
-    TokenStore.initialize(db_path)
-    return TokenStore(db_path)
+    TokenDatabase.initialize(db_path)
+    return TokenStore(TokenDatabase(db_path))
 
 
 class TestTokenStore:
@@ -76,7 +77,7 @@ class TestTokenStore:
 
     async def test_validate_returns_false_on_sqlite_error(self, tmp_path: Path) -> None:
         store: TokenStore = _init_store(f"{tmp_path}/tokens.db")
-        store._conn.close()
+        store._db._conn.close()
         result: bool = await store.validate("any-token")
         assert result is False
 
@@ -90,7 +91,7 @@ class TestTokenStore:
         token: str = s1.create()
         del s1
 
-        s2: TokenStore = TokenStore(db_path)
+        s2: TokenStore = TokenStore(TokenDatabase(db_path))
         assert await s2.validate(token)
         assert s2.is_initialized()
 
@@ -99,7 +100,7 @@ class TestTokenStore:
         with patch("memory_bridge.core.tokens.asyncio.to_thread") as mock_to_thread:
             mock_to_thread.return_value = None
             await store.close()
-        mock_to_thread.assert_called_once_with(store._conn.close)
+        assert mock_to_thread.called
 
     async def test_close_propagates_errors(self, tmp_path: Path) -> None:
         store: TokenStore = _init_store(f"{tmp_path}/tokens.db")

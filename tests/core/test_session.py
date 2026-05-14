@@ -41,7 +41,7 @@ class TestSessionStore:
     def test_create_session(self) -> None:
         store: SessionStore = SessionStore()
         store.create("agent-1", "sess-1")
-        assert store.exists("agent-1", "sess-1")
+        store.get("agent-1", "sess-1")  # does not raise
 
     def test_create_with_initial_messages(self) -> None:
         store: SessionStore = SessionStore()
@@ -63,15 +63,6 @@ class TestSessionStore:
         store.create("agent-1", "sess-1")
         with pytest.raises(SessionExistsError, match="SESSION_EXISTS"):
             store.create("agent-1", "sess-1")
-
-    def test_exists_returns_false_for_missing(self) -> None:
-        store: SessionStore = SessionStore()
-        assert not store.exists("agent-1", "nonexistent")
-
-    def test_exists_returns_true_after_create(self) -> None:
-        store: SessionStore = SessionStore()
-        store.create("agent-1", "sess-1")
-        assert store.exists("agent-1", "sess-1")
 
     def test_get_raises_for_missing(self) -> None:
         store: SessionStore = SessionStore()
@@ -120,16 +111,6 @@ class TestSessionStore:
         store.create("agent-1", "sess-2", messages=[{"role": "user", "content": "s2"}])
         assert store.get("agent-1", "sess-1")[0]["content"] == "s1"
         assert store.get("agent-1", "sess-2")[0]["content"] == "s2"
-
-    def test_clear_removes_session(self) -> None:
-        store: SessionStore = SessionStore()
-        store.create("agent-1", "sess-1")
-        store.clear("agent-1", "sess-1")
-        assert not store.exists("agent-1", "sess-1")
-
-    def test_clear_nonexistent_does_not_raise(self) -> None:
-        store: SessionStore = SessionStore()
-        store.clear("agent-1", "nonexistent")
 
     def test_max_history_enforced_on_create(self) -> None:
         store: SessionStore = SessionStore(max_history=3)

@@ -29,7 +29,6 @@ def mock_settings() -> Generator[MagicMock, None, None]:
         settings.dashscope_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         settings.mem0_collection_name = "memory_bridge"
         settings.prompts_dir = "prompts"
-        settings.validate_secrets = MagicMock(return_value=None)
         mock_cls.return_value = settings
         yield settings
 
@@ -37,12 +36,19 @@ def mock_settings() -> Generator[MagicMock, None, None]:
 @pytest.fixture
 def mock_components() -> Generator[dict[str, MagicMock], None, None]:
     with (
+        patch("memory_bridge.main.TokenDatabase") as mock_tdb,
         patch("memory_bridge.main.TokenStore") as mock_ts,
         patch("memory_bridge.main.build_mem0_config", return_value={"key": "val"}),
         patch("memory_bridge.main.MemoryManager") as mock_mm,
+        patch("memory_bridge.main.DeepSeekHttpClient") as mock_dhc,
         patch("memory_bridge.main.DeepSeekProvider") as mock_dp,
-        patch("os.makedirs"),
+        patch("memory_bridge.main.SessionStore") as mock_ss,
+        patch("memory_bridge.main.ContextBuilder") as mock_cb,
     ):
+        tdb: MagicMock = MagicMock()
+        tdb.close = AsyncMock()
+        mock_tdb.return_value = tdb
+
         ts: MagicMock = MagicMock()
         ts.is_initialized.return_value = False
         ts.validate = AsyncMock(return_value=True)
@@ -53,14 +59,28 @@ def mock_components() -> Generator[dict[str, MagicMock], None, None]:
         mm.close = AsyncMock()
         mock_mm.return_value = mm
 
+        dhc: MagicMock = MagicMock()
+        dhc.close = AsyncMock()
+        mock_dhc.return_value = dhc
+
         dp: MagicMock = MagicMock()
         dp.close = AsyncMock()
         mock_dp.return_value = dp
 
+        ss: MagicMock = MagicMock()
+        mock_ss.return_value = ss
+
+        cb: MagicMock = MagicMock()
+        mock_cb.return_value = cb
+
         yield {
+            "token_db": tdb,
             "token_store": ts,
             "memory_manager": mm,
+            "deepseek_http_client": dhc,
             "provider": dp,
+            "session_store": ss,
+            "context_builder": cb,
         }
 
 
@@ -99,7 +119,7 @@ class TestLifespan:
         app: FastAPI = FastAPI(title="Test")
         async with lifespan(app):
             from memory_bridge.providers.registry import ProviderRegistry
-            assert ProviderRegistry.get("deepseek-chat") is mock_components["provider"]
+            assert ProviderRegistry.get_default() is mock_components["provider"]
 
     async def test_sets_token_disabled_when_no_tokens(
         self,
@@ -156,4 +176,3 @@ class TestLifespan:
 
         mock_components["provider"].close.assert_called_once()
         assert "memory_manager" in close_order
-

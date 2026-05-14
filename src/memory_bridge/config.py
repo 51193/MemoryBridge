@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,8 +30,9 @@ class Settings(BaseSettings):
     prompts_dir: str = "prompts"
     token_db_path: str = "data/tokens.db"
 
-    def validate_secrets(self) -> None:
-        """Raise ValueError if any required secret is not configured."""
+    @model_validator(mode="after")
+    def validate_secrets(self) -> "Settings":
+        """Validate required secrets are non-empty after construction."""
         missing: list[str] = []
         if not self.deepseek_api_key:
             missing.append("DEEPSEEK_API_KEY")
@@ -38,3 +40,4 @@ class Settings(BaseSettings):
             missing.append("DASHSCOPE_API_KEY")
         if missing:
             raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+        return self

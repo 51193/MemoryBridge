@@ -20,3 +20,7 @@ class AbstractLLMProvider(ABC):
 
         Subclasses implement this as an async generator.
         """
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Release provider resources (connections, pools, etc.)."""

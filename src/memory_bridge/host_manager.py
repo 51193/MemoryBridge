@@ -83,9 +83,8 @@ def main() -> None:
 
     logger.info("cwd: %s", Path.cwd())
 
-    settings: Settings = Settings()
     try:
-        settings.validate_secrets()
+        settings: Settings = Settings()
     except ValueError as e:
         print(f"Configuration error: {e}")
         sys.exit(1)
@@ -140,13 +139,15 @@ def _run_init() -> None:
     else:
         print(".env already exists, skipping.")
 
+    from .core.token_database import TokenDatabase
     from .core.tokens import TokenStore
 
     db_path: str = os.environ.get("TOKEN_DB_PATH", "data/tokens.db")
     print(f"Initializing token database: {db_path}")
-    TokenStore.initialize(db_path)
+    TokenDatabase.initialize(db_path)
 
-    store: TokenStore = TokenStore(db_path)
+    token_db: TokenDatabase = TokenDatabase(db_path)
+    store: TokenStore = TokenStore(token_db)
     token: str = store.create(label="admin")
     print(f"Initial admin token: {token}")
     print()
@@ -208,10 +209,12 @@ def _download_file(url: str, dest: Path) -> None:
 
 def _run_init_token() -> None:
     """Generate an additional API token (requires existing database)."""
+    from .core.token_database import TokenDatabase
     from .core.tokens import TokenStore
 
     db_path: str = os.environ.get("TOKEN_DB_PATH", "data/tokens.db")
-    store: TokenStore = TokenStore(db_path)
+    token_db: TokenDatabase = TokenDatabase(db_path)
+    store: TokenStore = TokenStore(token_db)
     token: str = store.create(label="admin")
     print(f"Token: {token}")
     print()

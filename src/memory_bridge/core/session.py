@@ -76,17 +76,6 @@ class SessionStore:
             messages_count=msg_count,
         )
 
-    def exists(self, agent_id: str, session_id: str) -> bool:
-        result: bool = (agent_id, session_id) in self._sessions
-        if not result:
-            structured_debug(
-                logger,
-                "session check → not found",
-                agent_id=agent_id,
-                session_id=session_id,
-            )
-        return result
-
     def get(self, agent_id: str, session_id: str) -> list[dict[str, object]]:
         key: tuple[str, str] = (agent_id, session_id)
         if key not in self._sessions:
@@ -128,15 +117,3 @@ class SessionStore:
             added=len(filtered),
             total=len(self._sessions[key]),
         )
-
-    def clear(self, agent_id: str, session_id: str) -> None:
-        key: tuple[str, str] = (agent_id, session_id)
-        existed: bool = key in self._sessions
-        self._sessions.pop(key, None)
-        if existed:
-            structured_debug(
-                logger,
-                "session cleared",
-                agent_id=agent_id,
-                session_id=session_id,
-            )

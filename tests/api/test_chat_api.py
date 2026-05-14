@@ -35,12 +35,6 @@ def reset_registry() -> None:
     ProviderRegistry.reset()
 
 
-def _make_boxed_session_store() -> list[SessionStore]:
-    """Return a boxed SessionStore so the same instance is shared across registration and tests."""
-    ss: SessionStore = SessionStore()
-    return [ss]
-
-
 def _make_app(
     memory_manager: MemoryManager | None = None,
     session_store: SessionStore | None = None,
@@ -58,10 +52,14 @@ def _make_app(
         app.state.memory_manager = memory_manager
         app.dependency_overrides[get_memory_manager] = lambda: memory_manager
 
+    ss: SessionStore = session_store or SessionStore()
+    app.state.session_store = ss
     if session_store is not None:
         app.dependency_overrides[get_session_store] = lambda: session_store
 
-    app.dependency_overrides[get_context_builder] = lambda: ContextBuilder()
+    cb: ContextBuilder = ContextBuilder()
+    app.state.context_builder = cb
+    app.dependency_overrides[get_context_builder] = lambda: cb
 
     if mock_provider is not None:
         ProviderRegistry.register("deepseek-chat", mock_provider)
@@ -139,7 +137,7 @@ class TestSessions:
         })
         assert response.status_code == 201
         assert response.json()["agent_session_id"] == "sess-1"
-        assert session_store.exists("agent-1", "sess-1")
+        session_store.get("agent-1", "sess-1")  # does not raise → exists
 
     def test_create_session_auto_generates_id(self) -> None:
         session_store: SessionStore = SessionStore()
@@ -149,7 +147,7 @@ class TestSessions:
         assert response.status_code == 201
         sid: str = response.json()["agent_session_id"]
         assert len(sid) == 12
-        assert session_store.exists("agent-1", sid)
+        session_store.get("agent-1", sid)  # does not raise → exists
 
     def test_create_session_duplicate_409(self) -> None:
         session_store: SessionStore = SessionStore()

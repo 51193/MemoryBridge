@@ -12,9 +12,15 @@ class TestSettings:
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
         monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
-        settings: Settings = _make_settings()
-        assert settings.deepseek_api_key == ""
-        assert settings.dashscope_api_key == ""
+        monkeypatch.delenv("DEEPSEEK_THINKING_ENABLED", raising=False)
+        monkeypatch.delenv("DEEPSEEK_REASONING_EFFORT", raising=False)
+        monkeypatch.delenv("SESSION_MAX_HISTORY", raising=False)
+        settings: Settings = _make_settings(
+            deepseek_api_key="sk-test",
+            dashscope_api_key="sk-test",
+        )
+        assert settings.deepseek_api_key == "sk-test"
+        assert settings.dashscope_api_key == "sk-test"
         assert settings.deepseek_base_url == "https://api.deepseek.com"
         assert settings.deepseek_model == "deepseek-chat"
         assert settings.deepseek_thinking_enabled is False
@@ -56,23 +62,21 @@ class TestSettings:
     ) -> None:
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
         monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
-        settings: Settings = _make_settings()
         with pytest.raises(ValueError, match="DEEPSEEK_API_KEY"):
-            settings.validate_secrets()
+            _make_settings()
 
     def test_validate_secrets_pass_with_keys(self) -> None:
         settings: Settings = _make_settings(
             deepseek_api_key="sk-test",
             dashscope_api_key="sk-test",
         )
-        settings.validate_secrets()
+        assert settings.deepseek_api_key == "sk-test"
 
     def test_validate_secrets_raises_partial(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
-        settings: Settings = _make_settings(
-            deepseek_api_key="sk-test",
-        )
         with pytest.raises(ValueError, match="DASHSCOPE_API_KEY"):
-            settings.validate_secrets()
+            _make_settings(
+                deepseek_api_key="sk-test",
+            )

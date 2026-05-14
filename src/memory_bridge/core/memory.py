@@ -15,7 +15,6 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 def build_mem0_config(settings: Settings) -> dict[str, Any]:
     """Build Mem0 configuration dict from project settings."""
-    settings.validate_secrets()
     config: dict[str, Any] = {
         "llm": {
             "provider": "deepseek",

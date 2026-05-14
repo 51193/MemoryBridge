@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from ..core.context import ContextBuilder
 from ..core.memory import MemoryManager
 from ..core.prompts import load_prompt
-from ..core.session import SessionNotFoundError, SessionStore
+from ..core.session import SessionExistsError, SessionNotFoundError, SessionStore
 from ..exceptions import MemorySearchError, MemoryStoreError, ProviderNotFoundError
 from ..logfmt import structured_debug, structured_info
 from ..models.request import ChatRequest, Message, SessionCreateRequest
@@ -72,9 +72,8 @@ async def create_session(
 ) -> dict[str, object]:
     session_id: str = req.agent_session_id or uuid.uuid4().hex[:12]
 
-    from ..core.session import SessionExistsError
-
     try:
+
         msg_list: list[dict[str, object]] = (
             _messages_as_dicts(req.initial_messages)
             if req.initial_messages

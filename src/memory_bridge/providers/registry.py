@@ -7,7 +7,8 @@ from .base import AbstractLLMProvider
 class ProviderRegistry:
     """Singleton registry for LLM providers.
 
-    Providers are registered by model name and looked up at request time.
+    Providers are registered by model name. Use get_default() to resolve
+    the currently registered provider.
     """
 
     _providers: dict[str, AbstractLLMProvider] = {}
@@ -16,17 +17,6 @@ class ProviderRegistry:
     def register(cls, model: str, provider: AbstractLLMProvider) -> None:
         """Register a provider for a given model name."""
         cls._providers[model] = provider
-
-    @classmethod
-    def get(cls, model: str) -> AbstractLLMProvider:
-        """Get the provider for a model name.
-
-        Raises:
-            ProviderNotFoundError: If no provider is registered for the model.
-        """
-        if model not in cls._providers:
-            raise ProviderNotFoundError(f"No provider registered for model: {model}")
-        return cls._providers[model]
 
     @classmethod
     def get_default(cls) -> AbstractLLMProvider:

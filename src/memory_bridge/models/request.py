@@ -6,9 +6,6 @@ from pydantic import BaseModel, Field
 class Message(BaseModel):
     role: Literal["system", "user", "assistant", "tool"]
     content: str
-    name: str | None = None
-    tool_calls: list[dict[str, object]] | None = None
-    tool_call_id: str | None = None
     reasoning_content: str | None = None
 
 

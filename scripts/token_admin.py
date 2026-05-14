@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from memory_bridge.core.tokens import TokenRecord, TokenStore, TokenStoreError  # noqa: E402
+from memory_bridge.core.token_database import TokenDatabase, TokenDatabaseError  # noqa: E402
+from memory_bridge.core.tokens import TokenRecord, TokenStore  # noqa: E402
 
 
 def main() -> None:
@@ -24,8 +25,9 @@ def main() -> None:
 
     db_path: str = os.environ.get("TOKEN_DB_PATH", "data/tokens.db")
     try:
-        store: TokenStore = TokenStore(db_path)
-    except TokenStoreError as e:
+        token_db: TokenDatabase = TokenDatabase(db_path)
+        store: TokenStore = TokenStore(token_db)
+    except TokenDatabaseError as e:
         print(f"Error: {e}")
         sys.exit(1)
 
