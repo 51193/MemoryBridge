@@ -27,14 +27,24 @@ class TestStartQdrant:
         with pytest.raises(HostManagerError, match="Qdrant binary not found"):
             _start_qdrant(settings, missing_bin, tmp_path / "data")
 
-    def test_creates_data_directory(self, tmp_path: Path) -> None:
+    def test_missing_data_dir_raises(self, tmp_path: Path) -> None:
+        settings: Settings = _make_settings()
+        fake_bin: Path = tmp_path / "fake_qdrant"
+        fake_bin.write_text("#!/bin/sh\nsleep 60\n")
+        fake_bin.chmod(0o755)
+
+        missing_dir: Path = tmp_path / "nonexistent_data"
+        with pytest.raises(HostManagerError, match="Data directory not found"):
+            _start_qdrant(settings, fake_bin, missing_dir)
+
+    def test_starts_with_existing_data_dir(self, tmp_path: Path) -> None:
         settings: Settings = _make_settings()
         fake_bin: Path = tmp_path / "fake_qdrant"
         fake_bin.write_text("#!/bin/sh\nsleep 60\n")
         fake_bin.chmod(0o755)
 
         data_dir: Path = tmp_path / "data"
-        assert not data_dir.exists()
+        data_dir.mkdir()
 
         mock_proc: MagicMock = MagicMock(spec=subprocess.Popen)
         mock_proc.poll.return_value = None
@@ -53,7 +63,6 @@ class TestStartQdrant:
                 settings, fake_bin, data_dir
             )
             assert proc is mock_proc
-            assert data_dir.exists()
 
     def test_startup_timeout_raises(self, tmp_path: Path) -> None:
         settings: Settings = _make_settings()
@@ -62,6 +71,7 @@ class TestStartQdrant:
         fake_bin.chmod(0o755)
 
         data_dir: Path = tmp_path / "data"
+        data_dir.mkdir()
 
         mock_proc: MagicMock = MagicMock(spec=subprocess.Popen)
         mock_proc.poll.return_value = None
@@ -91,6 +101,7 @@ class TestStartQdrant:
         fake_bin.chmod(0o755)
 
         data_dir: Path = tmp_path / "data"
+        data_dir.mkdir()
 
         mock_proc: MagicMock = MagicMock(spec=subprocess.Popen)
         mock_proc.poll.return_value = None

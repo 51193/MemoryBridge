@@ -27,6 +27,27 @@ SHUTDOWN_TIMEOUT: int = 10
 _qdrant_proc: subprocess.Popen[bytes] | None = None
 _bridge_proc: subprocess.Popen[bytes] | None = None
 
+HELP_TEXT: str = """\
+MemoryBridge — Agent LLM memory and context middleware.
+
+Usage: memorybridge [OPTION]
+
+Options:
+  (no args)          Start the service (Qdrant + MemoryBridge API)
+  --init             Run first-time setup (Qdrant, .env, data dirs, API token)
+  --init-token       Create a new API token (requires existing database)
+  --version, -V      Print version and exit
+  --help, -h         Show this help and exit
+
+Quick start:
+  python memorybridge.pyz --init    # one-time setup
+  python memorybridge.pyz           # start service
+
+Build & test:
+  bash scripts/build.sh --check     # lint + typecheck + test
+  bash scripts/build.sh --build     # build .pyz only
+"""
+
 
 class HostManagerError(Exception):
     """Raised when host manager encounters a fatal error during startup."""
@@ -35,17 +56,22 @@ class HostManagerError(Exception):
 def main() -> None:
     setup_logging()
 
-    if len(sys.argv) > 1 and sys.argv[1] == "--version":
-        try:
-            from importlib.metadata import version
-            print(version("memory-bridge"))
-        except Exception:
-            print("dev")
+    if len(sys.argv) > 1 and sys.argv[1] in ("--help", "-h"):
+        print(HELP_TEXT)
         return
 
-    if len(sys.argv) > 1 and sys.argv[1] == "--setup":
+    if len(sys.argv) > 1 and sys.argv[1] in ("--version", "-V"):
         try:
-            _run_setup()
+            from importlib.metadata import version
+
+            print(f"memorybridge {version('memory-bridge')}")
+        except Exception:
+            print("memorybridge dev")
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "--init":
+        try:
+            _run_init()
         except HostManagerError as e:
             print(f"Error: {e}")
             sys.exit(1)
@@ -54,6 +80,8 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "--init-token":
         _run_init_token()
         return
+
+    logger.info("cwd: %s", Path.cwd())
 
     settings: Settings = Settings()
     try:
@@ -68,11 +96,16 @@ def main() -> None:
         sys.exit(1)
 
 
-def _run_setup() -> None:
-    """Initialize directories, download Qdrant, and create .env template."""
+def _run_init() -> None:
+    """Run first-time initialization: dirs, Qdrant, .env template, token DB, API token."""
+
     data_dir: Path = Path("data/qdrant")
     data_dir.mkdir(parents=True, exist_ok=True)
     print(f"Created data directory: {data_dir}")
+
+    prompts_dir: Path = Path("prompts")
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Created prompts directory: {prompts_dir}")
 
     qdrant_bin: Path = Path("bin/qdrant")
     if not qdrant_bin.exists():
@@ -88,8 +121,8 @@ def _run_setup() -> None:
             "LOG_LEVEL=INFO\n"
             "DEEPSEEK_BASE_URL=https://api.deepseek.com\n"
             "DEEPSEEK_MODEL=deepseek-chat\n"
-            "#DEEPSEEK_THINKING_ENABLED=false\n"
-            "#DEEPSEEK_REASONING_EFFORT=high\n"
+            "DEEPSEEK_THINKING_ENABLED=false\n"
+            "DEEPSEEK_REASONING_EFFORT=high\n"
             "EMBEDDING_MODEL=text-embedding-v4\n"
             "EMBEDDING_DIMS=1024\n"
             "DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1\n"
@@ -107,9 +140,24 @@ def _run_setup() -> None:
     else:
         print(".env already exists, skipping.")
 
+    from .core.tokens import TokenStore
+
+    db_path: str = os.environ.get("TOKEN_DB_PATH", "data/tokens.db")
+    print(f"Initializing token database: {db_path}")
+    TokenStore.initialize(db_path)
+
+    store: TokenStore = TokenStore(db_path)
+    token: str = store.create(label="admin")
+    print(f"Initial admin token: {token}")
     print()
-    print("Setup complete. Edit .env with your API keys, then run:")
-    print("  python memorybridge.pyz")
+    print("=== Init complete ===")
+    print()
+    print("Next steps:")
+    print("  1. Edit .env with your API keys")
+    print("  2. Start: python memorybridge.pyz")
+    print()
+    print("Use this token in requests:")
+    print(f"  Authorization: Bearer {token}")
 
 
 def _download_qdrant(qdrant_bin: Path) -> None:
@@ -159,10 +207,11 @@ def _download_file(url: str, dest: Path) -> None:
 
 
 def _run_init_token() -> None:
-    """Generate initial API token."""
+    """Generate an additional API token (requires existing database)."""
     from .core.tokens import TokenStore
 
-    store: TokenStore = TokenStore(os.environ.get("TOKEN_DB_PATH", "data/tokens.db"))
+    db_path: str = os.environ.get("TOKEN_DB_PATH", "data/tokens.db")
+    store: TokenStore = TokenStore(db_path)
     token: str = store.create(label="admin")
     print(f"Token: {token}")
     print()
@@ -215,10 +264,14 @@ def _start_qdrant(
     if not qdrant_bin.exists():
         raise HostManagerError(
             f"Qdrant binary not found at {qdrant_bin}."
-            " Run: python memorybridge.pyz --setup"
+            " Run: python memorybridge.pyz --init"
         )
 
-    data_dir.mkdir(parents=True, exist_ok=True)
+    if not data_dir.exists():
+        raise HostManagerError(
+            f"Data directory not found: {data_dir}."
+            " Run: python memorybridge.pyz --init"
+        )
 
     env: dict[str, str] = os.environ.copy()
     env["QDRANT__STORAGE__STORAGE_PATH"] = str(data_dir)

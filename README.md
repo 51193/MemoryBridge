@@ -42,10 +42,10 @@ uv sync
 
 ### 2. 初始化
 
-`--setup` 会自动下载 Qdrant 二进制、创建数据目录、生成 .env 模板：
+`--init` 会自动下载 Qdrant 二进制、创建数据目录、生成 .env 模板、创建 API Token：
 
 ```bash
-uv run python src/memory_bridge/host_manager.py --setup
+uv run python src/memory_bridge/host_manager.py --init
 ```
 
 ### 3. 配置 API Key
@@ -84,7 +84,7 @@ wget https://github.com/51193/MemoryBridge/releases/latest/download/memorybridge
 ### 2. 初始化 + 配置
 
 ```bash
-python3 memorybridge.pyz --setup  # 自动下载 Qdrant + 创建 .env 模板
+python3 memorybridge.pyz --init  # 自动下载 Qdrant + 创建 .env 模板 + 初始化 token
 # 编辑 .env 填入 API Key
 ```
 
@@ -94,13 +94,15 @@ python3 memorybridge.pyz --setup  # 自动下载 Qdrant + 创建 .env 模板
 python3 memorybridge.pyz
 ```
 
-服务器只需 Python 3.11+，所有依赖由 `.pyz` 自带，Qdrant 由 `--setup` 自动下载。
+服务器只需 Python 3.11+，所有依赖由 `.pyz` 自带，Qdrant 由 `--init` 自动下载。
 
 ## Token 认证
 
 MemoryBridge 默认启用 Token 认证，所有请求（除 `/health` 外）需要携带有效 Token。
 
 ### 初始化 Token 系统
+
+`--init` 自动创建初始 Token，如需单独生成新 Token：
 
 ```bash
 # 源码开发
@@ -134,7 +136,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -d '{"messages":[...],"agent_id":"agent-1","agent_session_id":"sess-1"}'
 ```
 
-Token 管理系统独立于向量数据库，数据存储在 `data/tokens.db`。首次部署后必须先执行 `--init-token` 创建初始 Token，否则所有请求将被拒绝。
+Token 管理系统独立于向量数据库，数据存储在 `data/tokens.db`。首次部署后 `--init` 自动创建初始 Token，否则所有请求将被拒绝。
 
 ## 使用方式
 

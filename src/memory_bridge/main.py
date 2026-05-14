@@ -1,5 +1,4 @@
 import logging
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError
@@ -37,7 +36,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Authentication is DISABLED until tokens exist.")
 
     init_session_store(settings.session_max_history)
-    os.makedirs(settings.prompts_dir, exist_ok=True)
 
     config: dict[str, object] = build_mem0_config(settings)
     app.state.memory_manager = MemoryManager(config)

@@ -9,13 +9,17 @@ from pathlib import Path
 logger: logging.Logger = logging.getLogger(__name__)
 
 SCHEMA: str = """\
-CREATE TABLE IF NOT EXISTS tokens (
+CREATE TABLE tokens (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     token      TEXT NOT NULL UNIQUE,
     label      TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now'))
 );
 """
+
+
+class TokenStoreError(Exception):
+    """Raised when token database is not initialized."""
 
 
 class TokenRecord:
@@ -29,12 +33,27 @@ class TokenRecord:
 class TokenStore:
     """SQLite-backed API token storage."""
 
-    def __init__(self, db_path: str) -> None:
+    @classmethod
+    def initialize(cls, db_path: str) -> None:
+        """Create the database and table. Called only during --init."""
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn: sqlite3.Connection = sqlite3.connect(db_path, check_same_thread=False)
+        conn: sqlite3.Connection = sqlite3.connect(db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(SCHEMA)
+        conn.commit()
+        conn.close()
+        logger.info("token database initialized: %s", db_path)
+
+    def __init__(self, db_path: str) -> None:
+        if not Path(db_path).is_file():
+            raise TokenStoreError(
+                f"Token database not found: {db_path}. "
+                "Run: python memorybridge.pyz --init"
+            )
+        self._conn: sqlite3.Connection = sqlite3.connect(
+            db_path, check_same_thread=False
+        )
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute(SCHEMA)
-        self._conn.commit()
 
     def is_initialized(self) -> bool:
         row: tuple[int] | None = self._conn.execute(

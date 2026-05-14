@@ -531,15 +531,15 @@ MemoryBridge/
 
 ```bash
 uv sync
-uv run python src/memory_bridge/host_manager.py --setup  # 首次：下载 Qdrant + 创建 .env
+uv run python src/memory_bridge/host_manager.py --init  # 首次：下载 Qdrant + 创建 .env + 初始化 token
 uv run python src/memory_bridge/host_manager.py           # 启动
 ```
 
 ### Release 部署
 
 ```bash
-python3 memorybridge.pyz --setup  # 首次：自动下载 Qdrant + 创建 .env
+python3 memorybridge.pyz --init  # 首次：自动下载 Qdrant + 创建 .env + 初始化 token
 python3 memorybridge.pyz           # 启动
 ```
 
-`--setup` 会自动检测平台 (Linux x86_64/aarch64, macOS x86_64/arm64) 并下载对应 Qdrant 二进制。
+`--init` 会自动检测平台 (Linux x86_64/aarch64, macOS x86_64/arm64) 并下载对应 Qdrant 二进制。

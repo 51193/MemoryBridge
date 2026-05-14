@@ -158,7 +158,7 @@ uv run pytest
 |------|------|------|
 | 构建 | `hatchling` (via pyproject.toml) | 生成 wheel |
 | 单文件打包 | `shiv` | 将所有 Python 依赖打成 .pyz 文件 |
-| 二进制依赖 | `host_manager.py --setup` | 自动下载 Qdrant 二进制 |
+| 二进制依赖 | `host_manager.py --init` | 自动下载 Qdrant 二进制 |
 | 部署脚本 | 无额外脚本 | 启动 + 初始化均通过 `host_manager.py` 入口 |
 
 ## 选型理由
@@ -222,7 +222,7 @@ scp dist/memorybridge.pyz server:/opt/memorybridge/
 
 # 服务器上（首次）
 cd /opt/memorybridge
-python memorybridge.pyz --setup    # 下载 qdrant 二进制、创建 data 目录
+python memorybridge.pyz --init     # 下载 qdrant 二进制、创建 data 目录、初始化 token 数据库
 python memorybridge.pyz --version  # 查看版本
 
 # 每次启动
