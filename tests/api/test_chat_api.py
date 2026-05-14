@@ -17,7 +17,7 @@ from memory_bridge.core.context import ContextBuilder
 from memory_bridge.core.memory import MemoryManager
 from memory_bridge.core.session import SessionStore
 from memory_bridge.core.tokens import TokenStore
-from memory_bridge.exceptions import MemorySearchError
+from memory_bridge.exceptions import MemorySearchError, MemoryStoreError
 from memory_bridge.models.request import Message
 from memory_bridge.models.response import (
     ChatResponse,
@@ -49,7 +49,9 @@ def _make_app(
 ) -> FastAPI:
     app: FastAPI = FastAPI(title="MemoryBridgeTest")
     app.state.token_enabled = token_enabled
-    app.state.token_store = MagicMock(spec=TokenStore)
+    ts: MagicMock = MagicMock(spec=TokenStore)
+    ts.validate = AsyncMock()
+    app.state.token_store = ts
     app.state.qdrant_health_url = "http://localhost:6333/healthz"
 
     if memory_manager is not None:
@@ -245,7 +247,12 @@ def _make_chat_app(
     token_enabled: bool = False,
 ) -> TestClient:
     ss: SessionStore = session_store or SessionStore()
-    mm: MagicMock = memory_manager or MagicMock(spec=MemoryManager)
+    if memory_manager is not None:
+        mm = memory_manager
+    else:
+        mm = MagicMock(spec=MemoryManager)
+        mm.search = AsyncMock()
+        mm.add = AsyncMock()
     mp: MagicMock = mock_provider or MagicMock(spec=AbstractLLMProvider)
     app: FastAPI = _make_app(
         memory_manager=mm, session_store=ss, mock_provider=mp,
@@ -335,7 +342,8 @@ class TestChatCompletions:
         ss: SessionStore = SessionStore()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
-        mock_mm.search.side_effect = MemorySearchError("Qdrant down")
+        mock_mm.search = AsyncMock(side_effect=MemorySearchError("Qdrant down"))
+        mock_mm.add = AsyncMock()
 
         client: TestClient = _make_chat_app(
             memory_manager=mock_mm, session_store=ss
@@ -352,6 +360,8 @@ class TestChatCompletions:
         ss: SessionStore = SessionStore()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
+        mock_mm.search = AsyncMock()
+        mock_mm.add = AsyncMock()
         mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
         mock_provider.chat = AsyncMock(return_value=_make_chat_response())
 
@@ -390,7 +400,8 @@ class TestChatCompletions:
         ss: SessionStore = SessionStore()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
-        mock_mm.search.return_value = [{"id": "1", "memory": "test memory"}]
+        mock_mm.search = AsyncMock(return_value=[{"id": "1", "memory": "test memory"}])
+        mock_mm.add = AsyncMock()
 
         mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
         mock_provider.chat = AsyncMock(
@@ -492,3 +503,210 @@ class TestChatCompletions:
             "agent_id": "agent-1",
         })
         assert response.status_code == 422
+
+    def test_non_streaming_schedules_memory_background_task(self) -> None:
+        ss: SessionStore = SessionStore()
+        ss.create("agent-1", "sess-1")
+        mock_mm: MagicMock = MagicMock(spec=MemoryManager)
+        mock_mm.search = AsyncMock(return_value=[])
+        mock_mm.add = AsyncMock()
+        mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
+        mock_provider.chat = AsyncMock(return_value=_make_chat_response(content="ok"))
+
+        client: TestClient = _make_chat_app(
+            memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
+        )
+        response = client.post("/v1/chat/completions", json={
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "hello"}],
+            "agent_id": "agent-1",
+            "agent_session_id": "sess-1",
+            "memory_enabled": False,
+        })
+        assert response.status_code == 200
+        mock_mm.add.assert_called_once()
+
+    def test_streaming_stores_memory_after_completion(self) -> None:
+        ss: SessionStore = SessionStore()
+        ss.create("agent-1", "sess-1")
+        mock_mm: MagicMock = MagicMock(spec=MemoryManager)
+        mock_mm.search = AsyncMock(return_value=[])
+        mock_mm.add = AsyncMock()
+        mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
+
+        async def mock_stream() -> Any:
+            yield StreamChunk(
+                id="s1", created=1, model="m",
+                choices=[StreamChoice(
+                    index=0, delta=DeltaMessage(role="assistant", content="Hi"),
+                    finish_reason=None,
+                )],
+            )
+
+        mock_provider.chat_stream.return_value = mock_stream()
+
+        client: TestClient = _make_chat_app(
+            memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
+        )
+        response = client.post("/v1/chat/completions", json={
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "hello"}],
+            "agent_id": "agent-1",
+            "agent_session_id": "sess-1",
+            "stream": True,
+        })
+        assert response.status_code == 200
+        mock_mm.add.assert_called_once()
+
+    def test_streaming_does_not_store_on_empty_content(self) -> None:
+        ss: SessionStore = SessionStore()
+        ss.create("agent-1", "sess-1")
+        mock_mm: MagicMock = MagicMock(spec=MemoryManager)
+        mock_mm.search = AsyncMock(return_value=[])
+        mock_mm.add = AsyncMock()
+        mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
+
+        async def empty_stream() -> Any:
+            if False:
+                yield
+
+        mock_provider.chat_stream.return_value = empty_stream()
+
+        client: TestClient = _make_chat_app(
+            memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
+        )
+        response = client.post("/v1/chat/completions", json={
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "hello"}],
+            "agent_id": "agent-1",
+            "agent_session_id": "sess-1",
+            "stream": True,
+        })
+        assert response.status_code == 200
+        mock_mm.add.assert_not_called()
+
+    def test_store_memory_survives_memory_store_error(self) -> None:
+        ss: SessionStore = SessionStore()
+        ss.create("agent-1", "sess-1")
+        mock_mm: MagicMock = MagicMock(spec=MemoryManager)
+        mock_mm.search = AsyncMock(return_value=[])
+        mock_mm.add = AsyncMock(
+            side_effect=MemoryStoreError("Memory store failed for user_id=agent-1: boom")
+        )
+        mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
+        mock_provider.chat = AsyncMock(return_value=_make_chat_response(content="ok"))
+
+        client: TestClient = _make_chat_app(
+            memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
+        )
+        response = client.post("/v1/chat/completions", json={
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "hello"}],
+            "agent_id": "agent-1",
+            "agent_session_id": "sess-1",
+            "memory_enabled": False,
+        })
+        assert response.status_code == 200
+        mock_mm.add.assert_called_once()
+        assert len(ss.get("agent-1", "sess-1")) >= 2
+
+    def test_store_memory_appends_to_session_before_memory_add(self) -> None:
+        ss: SessionStore = SessionStore()
+        ss.create("agent-1", "sess-1")
+        mock_mm: MagicMock = MagicMock(spec=MemoryManager)
+        mock_mm.search = AsyncMock(return_value=[])
+        mock_mm.add = AsyncMock()
+        mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
+        mock_provider.chat = AsyncMock(return_value=_make_chat_response(content="ok"))
+
+        call_order: list[str] = []
+
+        def track_add(*args: Any, **kwargs: Any) -> None:
+            call_order.append("memory_add")
+
+        mock_mm.add.side_effect = track_add
+
+        client: TestClient = _make_chat_app(
+            memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
+        )
+        response = client.post("/v1/chat/completions", json={
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "hello"}],
+            "agent_id": "agent-1",
+            "agent_session_id": "sess-1",
+            "memory_enabled": False,
+        })
+        assert response.status_code == 200
+        history: list[dict[str, object]] = ss.get("agent-1", "sess-1")
+        assert len(history) >= 2
+
+    def test_chat_completions_with_empty_memory_results(self) -> None:
+        ss: SessionStore = SessionStore()
+        ss.create("agent-1", "sess-1")
+        mock_mm: MagicMock = MagicMock(spec=MemoryManager)
+        mock_mm.search = AsyncMock(return_value=[])
+        mock_mm.add = AsyncMock()
+        mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
+        mock_provider.chat = AsyncMock(return_value=_make_chat_response(content="ok"))
+
+        client: TestClient = _make_chat_app(
+            memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider
+        )
+        response = client.post("/v1/chat/completions", json={
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": "hello"}],
+            "agent_id": "agent-1",
+            "agent_session_id": "sess-1",
+        })
+        assert response.status_code == 200
+        mock_mm.search.assert_called_once_with(
+            "hello", user_id="agent-1", limit=5
+        )
+
+    def test_valid_token_returns_200(self) -> None:
+        ss: SessionStore = SessionStore()
+        ss.create("agent-1", "sess-1")
+        mock_mm: MagicMock = MagicMock(spec=MemoryManager)
+        mock_mm.search = AsyncMock(return_value=[])
+        mock_mm.add = AsyncMock()
+        mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
+        mock_provider.chat = AsyncMock(return_value=_make_chat_response(content="ok"))
+        app: FastAPI = _make_app(
+            memory_manager=mock_mm, session_store=ss, mock_provider=mock_provider,
+            token_enabled=True,
+        )
+        app.state.token_store.validate = AsyncMock(return_value=True)
+        client: TestClient = TestClient(app)
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": "hello"}],
+                "agent_id": "agent-1",
+                "agent_session_id": "sess-1",
+                "memory_enabled": False,
+            },
+            headers={"Authorization": "Bearer valid-token"},
+        )
+        assert response.status_code == 200
+
+    def test_inject_history_empty_history(self) -> None:
+        from memory_bridge.api.router import _inject_history
+        enriched: list[dict[str, object]] = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hello"},
+        ]
+        result: list[dict[str, object]] = _inject_history(enriched, [])
+        assert result == enriched
+
+    def test_inject_history_no_system_message(self) -> None:
+        from memory_bridge.api.router import _inject_history
+        enriched: list[dict[str, object]] = [
+            {"role": "user", "content": "hello"},
+        ]
+        history: list[dict[str, object]] = [
+            {"role": "user", "content": "history-q"},
+        ]
+        result: list[dict[str, object]] = _inject_history(enriched, history)
+        assert result[0] == history[0]
+        assert result[1] == enriched[0]

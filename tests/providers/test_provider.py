@@ -288,3 +288,48 @@ class TestDeepSeekProvider:
         }
         response: ChatResponse = provider._parse_response(data)
         assert response.choices[0].message.reasoning_content is None
+
+    @pytest.mark.anyio
+    async def test_chat_stream_http_error(self) -> None:
+        mock_client: MagicMock = MagicMock(spec=httpx.AsyncClient)
+        mock_response: MagicMock = MagicMock()
+        mock_response.status_code = 429
+        mock_response.aread = AsyncMock(return_value=b"Rate limit exceeded")
+
+        mock_client.stream = MagicMock()
+        mock_client.stream.return_value.__aenter__ = AsyncMock(
+            return_value=mock_response
+        )
+        mock_client.stream.return_value.__aexit__ = AsyncMock(return_value=None)
+
+        with patch(
+            "memory_bridge.providers.deepseek.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            provider: DeepSeekProvider = DeepSeekProvider(
+                api_key="sk-test", base_url="https://api.deepseek.com"
+            )
+            try:
+                with pytest.raises(ProviderError, match="DeepSeek returned 429"):
+                    async for _ in provider.chat_stream(
+                        _make_request(memory_enabled=False)
+                    ):
+                        pass
+            finally:
+                await provider.close()
+
+    @pytest.mark.anyio
+    async def test_close_closes_http_client(self) -> None:
+        mock_client: MagicMock = MagicMock(spec=httpx.AsyncClient)
+        mock_client.aclose = AsyncMock()
+
+        with patch(
+            "memory_bridge.providers.deepseek.httpx.AsyncClient",
+            return_value=mock_client,
+        ):
+            provider: DeepSeekProvider = DeepSeekProvider(
+                api_key="sk-test", base_url="https://api.deepseek.com"
+            )
+            await provider.close()
+
+        mock_client.aclose.assert_called_once()

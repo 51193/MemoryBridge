@@ -1,5 +1,6 @@
 """Token store — SQLite-backed API token management."""
 
+import asyncio
 import logging
 import secrets
 import sqlite3
@@ -30,7 +31,7 @@ class TokenStore:
 
     def __init__(self, db_path: str) -> None:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn: sqlite3.Connection = sqlite3.connect(db_path)
+        self._conn: sqlite3.Connection = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute(SCHEMA)
         self._conn.commit()
@@ -41,11 +42,17 @@ class TokenStore:
         ).fetchone()
         return row is not None and row[0] > 0
 
-    def validate(self, token: str) -> bool:
-        row: tuple[int] | None = self._conn.execute(
-            "SELECT 1 FROM tokens WHERE token = ?", (token,)
-        ).fetchone()
-        return row is not None
+    async def validate(self, token: str) -> bool:
+        try:
+            row: tuple[int] | None = await asyncio.to_thread(
+                lambda: self._conn.execute(
+                    "SELECT 1 FROM tokens WHERE token = ?", (token,)
+                ).fetchone()
+            )
+            return row is not None
+        except Exception:
+            logger.exception("token validation failed")
+            return False
 
     def create(self, label: str = "") -> str:
         token: str = secrets.token_hex(16)
@@ -66,6 +73,6 @@ class TokenStore:
         self._conn.execute("DELETE FROM tokens WHERE token = ?", (token,))
         self._conn.commit()
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Close the SQLite connection."""
-        self._conn.close()
+        await asyncio.to_thread(self._conn.close)

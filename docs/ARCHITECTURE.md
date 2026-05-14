@@ -54,6 +54,8 @@ Docker 引入额外的守护进程、镜像管理和网络命名空间开销。Q
 
 ## 三、请求处理链路
 
+MemoryBridge 采用**全异步**事件循环模型。所有 I/O 密集型操作（LLM 调用、记忆检索/存储、Token 校验、文件读取）均通过 `async/await` 实现非阻塞执行。Mem0 同步 API 通过 `asyncio.to_thread()` 投递到线程池，确保事件循环不被阻塞。
+
 以一次 `POST /v1/chat/completions` 请求为例，完整链路如下：
 
 ```
@@ -183,7 +185,9 @@ Docker 引入额外的守护进程、镜像管理和网络命名空间开销。Q
 
 ### 4.1 架构概览
 
-记忆子系统由三层组成：
+记忆子系统由三层组成。
+
+**异步设计**：MemoryManager 的 `search()`、`add()`、`close()` 均为 `async` 方法。由于 Mem0 库（mem0ai）只暴露同步 API，所有 Mem0 调用通过 `asyncio.to_thread()` 包装到线程池执行，避免阻塞 FastAPI 事件循环。这确保了多个 Agent 并发请求时不会相互阻塞。
 
 ```
 ┌─────────────────────────────────────┐

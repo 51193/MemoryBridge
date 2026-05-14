@@ -1,5 +1,6 @@
 """Mem0 memory layer — search and store agent memories."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -63,7 +64,7 @@ class MemoryManager:
     def __init__(self, config: dict[str, Any]) -> None:
         self._memory: Memory = Memory.from_config(config)
 
-    def search(self, query: str, *, user_id: str, limit: int = 5) -> list[dict[str, Any]]:
+    async def search(self, query: str, *, user_id: str, limit: int = 5) -> list[dict[str, Any]]:
         """Search for memories relevant to the query.
 
         Args:
@@ -86,7 +87,8 @@ class MemoryManager:
             limit=limit,
         )
         try:
-            result: dict[str, Any] = self._memory.search(
+            result: dict[str, Any] = await asyncio.to_thread(
+                self._memory.search,
                 query,
                 filters={"user_id": user_id},
                 top_k=limit,
@@ -106,7 +108,7 @@ class MemoryManager:
             logger.error("memory search failed: %s", e)
             raise MemorySearchError(f"Memory search failed: {e}") from e
 
-    def add(
+    async def add(
         self,
         messages: list[dict[str, Any]],
         *,
@@ -133,16 +135,23 @@ class MemoryManager:
             extra: dict[str, Any] = {}
             if prompt:
                 extra["prompt"] = prompt
-            self._memory.add(messages, user_id=user_id, metadata=metadata, **extra)
+            await asyncio.to_thread(
+                self._memory.add, messages, user_id=user_id, metadata=metadata, **extra
+            )
             structured_debug(logger, "memory stored")
         except Exception as e:
             raise MemoryStoreError(
                 f"Memory store failed for user_id={user_id}: {e}"
             ) from e
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Release Mem0 resources (Qdrant client, SQLite history DB)."""
         try:
-            self._memory.close()
+            await asyncio.to_thread(self._memory.close)
+        except RuntimeError:
+            logger.warning(
+                "asyncio.to_thread pool exhausted during Mem0 close; "
+                "resources may leak"
+            )
         except Exception:
             logger.warning("failed to close Mem0 cleanly", exc_info=True)

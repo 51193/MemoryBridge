@@ -34,7 +34,7 @@ MemoryBridge 是 Agent 与大模型之间的中间件，负责记忆检索、上
 ```bash
 uv run mypy src/          # 类型检查
 uv run ruff check src/    # Lint
-uv run pytest -v          # 单元/集成测试 (102 cases)
+uv run pytest -v          # 单元/集成测试 (141 cases)
 LOG_LEVEL=DEBUG uv run python src/memory_bridge/host_manager.py  # 启动（DEBUG 日志）
 python tests/integration/smoke_test.py   # 集成冒烟测试（需先启动服务）
 python tests/integration/cleanup.py      # 清理冒烟测试数据

@@ -29,7 +29,7 @@ class TokenAuthMiddleware(BaseHTTPMiddleware):
             )
 
         token: str = auth[7:]
-        if not request.app.state.token_store.validate(token):
+        if not await request.app.state.token_store.validate(token):
             return JSONResponse(
                 status_code=401,
                 content={"detail": "TOKEN_INVALID"},

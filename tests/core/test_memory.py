@@ -66,7 +66,7 @@ class TestBuildMem0Config:
 
 
 class TestMemoryManager:
-    def test_search_returns_memories(self) -> None:
+    async def test_search_returns_memories(self) -> None:
         mock_memory: MagicMock = MagicMock()
         mock_memory.search.return_value = {
             "results": [
@@ -79,7 +79,7 @@ class TestMemoryManager:
             "memory_bridge.core.memory.Memory.from_config", return_value=mock_memory
         ):
             manager: MemoryManager = MemoryManager({})
-            results: list[dict[str, Any]] = manager.search(
+            results: list[dict[str, Any]] = await manager.search(
                 "Python", user_id="agent-1", limit=5
             )
 
@@ -92,7 +92,7 @@ class TestMemoryManager:
             top_k=5,
         )
 
-    def test_search_returns_empty_list_for_no_results(self) -> None:
+    async def test_search_returns_empty_list_for_no_results(self) -> None:
         mock_memory: MagicMock = MagicMock()
         mock_memory.search.return_value = {"results": []}
 
@@ -100,11 +100,11 @@ class TestMemoryManager:
             "memory_bridge.core.memory.Memory.from_config", return_value=mock_memory
         ):
             manager: MemoryManager = MemoryManager({})
-            results: list[dict[str, Any]] = manager.search("missing", user_id="agent-1")
+            results: list[dict[str, Any]] = await manager.search("missing", user_id="agent-1")
 
         assert results == []
 
-    def test_search_missing_results_key(self) -> None:
+    async def test_search_missing_results_key(self) -> None:
         mock_memory: MagicMock = MagicMock()
         mock_memory.search.return_value = {}
 
@@ -112,11 +112,11 @@ class TestMemoryManager:
             "memory_bridge.core.memory.Memory.from_config", return_value=mock_memory
         ):
             manager: MemoryManager = MemoryManager({})
-            results: list[dict[str, Any]] = manager.search("query", user_id="agent-1")
+            results: list[dict[str, Any]] = await manager.search("query", user_id="agent-1")
 
         assert results == []
 
-    def test_search_failure_raises_memory_search_error(self) -> None:
+    async def test_search_failure_raises_memory_search_error(self) -> None:
         mock_memory: MagicMock = MagicMock()
         mock_memory.search.side_effect = RuntimeError("Qdrant connection refused")
 
@@ -125,9 +125,9 @@ class TestMemoryManager:
         ):
             manager: MemoryManager = MemoryManager({})
             with pytest.raises(MemorySearchError, match="Memory search failed"):
-                manager.search("query", user_id="agent-1")
+                await manager.search("query", user_id="agent-1")
 
-    def test_add_calls_mem0_add(self) -> None:
+    async def test_add_calls_mem0_add(self) -> None:
         mock_memory: MagicMock = MagicMock()
 
         with patch(
@@ -138,7 +138,7 @@ class TestMemoryManager:
                 {"role": "user", "content": "hello"},
                 {"role": "assistant", "content": "hi"},
             ]
-            manager.add(messages, user_id="agent-1", metadata={"session": "s1"})
+            await manager.add(messages, user_id="agent-1", metadata={"session": "s1"})
 
         mock_memory.add.assert_called_once_with(
             messages,
@@ -146,7 +146,7 @@ class TestMemoryManager:
             metadata={"session": "s1"},
         )
 
-    def test_add_with_prompt_passes_prompt_to_mem0(self) -> None:
+    async def test_add_with_prompt_passes_prompt_to_mem0(self) -> None:
         mock_memory: MagicMock = MagicMock()
 
         with patch(
@@ -156,7 +156,7 @@ class TestMemoryManager:
             messages: list[dict[str, Any]] = [
                 {"role": "user", "content": "hello"},
             ]
-            manager.add(
+            await manager.add(
                 messages,
                 user_id="agent-1",
                 prompt="重点关注技术偏好",
@@ -169,7 +169,7 @@ class TestMemoryManager:
             prompt="重点关注技术偏好",
         )
 
-    def test_add_failure_raises_memory_store_error(self) -> None:
+    async def test_add_failure_raises_memory_store_error(self) -> None:
         mock_memory: MagicMock = MagicMock()
         mock_memory.add.side_effect = RuntimeError("write failed")
 
@@ -182,9 +182,52 @@ class TestMemoryManager:
             with pytest.raises(
                 MemoryStoreError, match="Memory store failed for user_id=agent-1"
             ):
-                manager.add(
+                await manager.add(
                     [{"role": "user", "content": "hello"}],
                     user_id="agent-1",
                 )
 
         mock_memory.add.assert_called_once()
+
+    async def test_close_calls_mem0_close(self) -> None:
+        mock_memory: MagicMock = MagicMock()
+
+        with patch(
+            "memory_bridge.core.memory.Memory.from_config", return_value=mock_memory
+        ):
+            manager: MemoryManager = MemoryManager({})
+            await manager.close()
+
+        mock_memory.close.assert_called_once()
+
+    async def test_close_survives_internal_error(self) -> None:
+        mock_memory: MagicMock = MagicMock()
+        mock_memory.close.side_effect = RuntimeError("close failed")
+
+        with patch(
+            "memory_bridge.core.memory.Memory.from_config", return_value=mock_memory
+        ):
+            manager: MemoryManager = MemoryManager({})
+            await manager.close()
+
+        mock_memory.close.assert_called_once()
+
+    async def test_search_runs_in_thread_pool(self) -> None:
+        mock_memory: MagicMock = MagicMock()
+
+        with patch("memory_bridge.core.memory.Memory.from_config", return_value=mock_memory):
+            manager: MemoryManager = MemoryManager({})
+            with patch("memory_bridge.core.memory.asyncio.to_thread") as mock_to_thread:
+                mock_to_thread.return_value = {"results": []}
+                await manager.search("query", user_id="agent-1")
+                mock_to_thread.assert_called_once()
+
+    async def test_add_runs_in_thread_pool(self) -> None:
+        mock_memory: MagicMock = MagicMock()
+
+        with patch("memory_bridge.core.memory.Memory.from_config", return_value=mock_memory):
+            manager: MemoryManager = MemoryManager({})
+            with patch("memory_bridge.core.memory.asyncio.to_thread") as mock_to_thread:
+                mock_to_thread.return_value = None
+                await manager.add([{"role": "user", "content": "hi"}], user_id="agent-1")
+                mock_to_thread.assert_called_once()

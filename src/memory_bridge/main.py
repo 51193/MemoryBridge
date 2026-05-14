@@ -1,6 +1,8 @@
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as pkg_version
 
 from fastapi import FastAPI
@@ -35,6 +37,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("Authentication is DISABLED until tokens exist.")
 
     init_session_store(settings.session_max_history)
+    os.makedirs(settings.prompts_dir, exist_ok=True)
 
     config: dict[str, object] = build_mem0_config(settings)
     app.state.memory_manager = MemoryManager(config)
@@ -48,15 +51,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     ProviderRegistry.register(settings.deepseek_model, app.state.provider)
     yield
     await app.state.provider.close()
-    app.state.memory_manager.close()
-    app.state.token_store.close()
+    await app.state.memory_manager.close()
+    await app.state.token_store.close()
 
 
 def create_app() -> FastAPI:
     try:
         ver: str = pkg_version("memory-bridge")
+    except PackageNotFoundError:
+        ver = "dev"
     except Exception:
         ver = "dev"
+        logger.warning("could not determine package version", exc_info=True)
     app: FastAPI = FastAPI(
         title="MemoryBridge",
         version=ver,

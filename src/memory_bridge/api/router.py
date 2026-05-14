@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from ..core.context import ContextBuilder
 from ..core.memory import MemoryManager
+from ..core.prompts import load_prompt
 from ..core.session import SessionNotFoundError, SessionStore
 from ..exceptions import MemorySearchError, MemoryStoreError, ProviderNotFoundError
 from ..logfmt import structured_debug, structured_info
@@ -65,7 +66,7 @@ async def health(request: Request) -> dict[str, str]:
     status_code=201,
     response_model=SessionCreateResponse,
 )
-def create_session(
+async def create_session(
     req: SessionCreateRequest,
     session_store: SessionStore = Depends(get_session_store),
 ) -> dict[str, object]:
@@ -110,7 +111,7 @@ def create_session(
     "/v1/sessions/{agent_id}/{session_id}",
     response_model=SessionExportResponse,
 )
-def get_session(
+async def get_session(
     agent_id: str,
     session_id: str,
     session_store: SessionStore = Depends(get_session_store),
@@ -151,23 +152,10 @@ def _resolve_session(
 def _build_enriched_request(
     request: ChatRequest,
     session_history: list[dict[str, object]],
-    memory_manager: MemoryManager,
+    memories: list[dict[str, object]],
     context_builder: ContextBuilder,
 ) -> tuple[ChatRequest, int]:
     message_dicts: list[dict[str, object]] = _messages_as_dicts(request.messages)
-    memories: list[dict[str, object]] = []
-
-    if request.memory_enabled:
-        try:
-            memories = memory_manager.search(
-                str(request.messages[-1].content),
-                user_id=request.agent_id,
-                limit=request.memory_limit,
-            )
-        except MemorySearchError as e:
-            logger.error("memory search failed → 500: %s", e)
-            raise HTTPException(status_code=500, detail=str(e))
-
     enriched: list[dict[str, object]] = context_builder.build(
         message_dicts, memories
     )
@@ -256,9 +244,21 @@ async def chat_completions(
         session_store, request.agent_id, request.agent_session_id
     )
 
+    memories: list[dict[str, object]] = []
+    if request.memory_enabled:
+        try:
+            memories = await memory_manager.search(
+                str(request.messages[-1].content),
+                user_id=request.agent_id,
+                limit=request.memory_limit,
+            )
+        except MemorySearchError as e:
+            logger.error("memory search failed → 500: %s", e)
+            raise HTTPException(status_code=500, detail=str(e))
+
     enriched_request: ChatRequest
     enriched_request, _ = _build_enriched_request(
-        request, session_history, memory_manager, context_builder
+        request, session_history, memories, context_builder
     )
 
     if request.stream:
@@ -350,11 +350,13 @@ async def _store_memory(
         request.agent_id, request.agent_session_id, all_messages
     )
 
-    from ..core.prompts import load_prompt
-
-    prompt: str | None = load_prompt(request.agent_id, prompts_dir)
     try:
-        memory_manager.add(
+        prompt: str | None = await load_prompt(request.agent_id, prompts_dir)
+    except Exception:
+        logger.exception("failed to load prompt for agent=%s", request.agent_id)
+        prompt = None
+    try:
+        await memory_manager.add(
             all_messages,
             user_id=request.agent_id,
             metadata={"session_id": request.agent_session_id},

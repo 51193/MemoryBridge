@@ -36,6 +36,8 @@ def _make_app() -> FastAPI:
     app.state.qdrant_health_url = "http://localhost:6333/healthz"
 
     mock_mm: MagicMock = MagicMock(spec=MemoryManager)
+    mock_mm.search = AsyncMock()
+    mock_mm.add = AsyncMock()
     app.state.memory_manager = mock_mm
     app.dependency_overrides[get_memory_manager] = lambda: mock_mm
     app.dependency_overrides[get_session_store] = lambda: _session_store
