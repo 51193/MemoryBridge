@@ -131,7 +131,8 @@ def _run_init() -> None:
             "QDRANT_PORT=6333\n"
             "MEMORY_BRIDGE_HOST=0.0.0.0\n"
             "MEMORY_BRIDGE_PORT=8000\n"
-            "SESSION_MAX_HISTORY=50\n"
+            "SESSION_WINDOW_SIZE=10\n"
+            "SESSION_DB_PATH=data/sessions.db\n"
             "PROMPTS_DIR=prompts\n"
             "TOKEN_DB_PATH=data/tokens.db\n"
         )
@@ -150,6 +151,12 @@ def _run_init() -> None:
     store: TokenStore = TokenStore(token_db)
     token: str = store.create(label="admin")
     print(f"Initial admin token: {token}")
+
+    from .core.session_database import SessionDatabase
+
+    session_db_path: str = os.environ.get("SESSION_DB_PATH", "data/sessions.db")
+    print(f"Initializing session database: {session_db_path}")
+    SessionDatabase.initialize(session_db_path)
     print()
     print("=== Init complete ===")
     print()

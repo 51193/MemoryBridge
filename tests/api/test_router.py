@@ -4,6 +4,8 @@ These test Pydantic request validation — all post-dependency.
 They use a test app with all required dependencies overridden.
 """
 
+import os
+import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,18 +21,40 @@ from memory_bridge.api.router import router
 from memory_bridge.core.context import ContextBuilder
 from memory_bridge.core.memory import MemoryManager
 from memory_bridge.core.session import SessionStore
+from memory_bridge.core.session_database import SessionDatabase
 from memory_bridge.providers.base import AbstractLLMProvider
 from memory_bridge.providers.registry import ProviderRegistry
+
+
+_temp_paths: list[str] = []
+
+
+def _cleanup_temp_files() -> None:
+    for p in _temp_paths:
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+    _temp_paths.clear()
+
+
+def _make_temp_session_store() -> SessionStore:
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    _temp_paths.append(path)
+    SessionDatabase.initialize(path)
+    session_db: SessionDatabase = SessionDatabase(path)
+    return SessionStore(db=session_db, window_size=50)
 
 
 @pytest.fixture(autouse=True)
 def reset_state() -> None:
     ProviderRegistry.reset()
-    global _session_store
-    _session_store = SessionStore()
+    _cleanup_temp_files()
 
 
 def _make_app() -> FastAPI:
+    session_store: SessionStore = _make_temp_session_store()
     app: FastAPI = FastAPI(title="MemoryBridgeTest")
     app.state.token_enabled = False
     app.state.qdrant_health_url = "http://localhost:6333/healthz"
@@ -40,7 +64,7 @@ def _make_app() -> FastAPI:
     mock_mm.add = AsyncMock()
     app.state.memory_manager = mock_mm
     app.dependency_overrides[get_memory_manager] = lambda: mock_mm
-    app.dependency_overrides[get_session_store] = lambda: _session_store
+    app.dependency_overrides[get_session_store] = lambda: session_store
     app.dependency_overrides[get_context_builder] = lambda: ContextBuilder()
 
     mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
@@ -48,9 +72,6 @@ def _make_app() -> FastAPI:
 
     app.include_router(router)
     return app
-
-
-_session_store: SessionStore = SessionStore()
 
 
 @pytest.fixture
@@ -139,7 +160,6 @@ class TestSessionsValidation:
         body = response.json()
         assert body["agent_id"] == "agent-1"
         assert len(body["agent_session_id"]) == 12
-        assert body["message_count"] == 0
 
     def test_create_session_with_id(self, client: TestClient) -> None:
         response = client.post("/v1/sessions", json={
@@ -148,18 +168,6 @@ class TestSessionsValidation:
         })
         assert response.status_code == 201
         assert response.json()["agent_session_id"] == "sess-001"
-
-    def test_create_session_with_initial_messages(self, client: TestClient) -> None:
-        response = client.post("/v1/sessions", json={
-            "agent_id": "agent-1",
-            "agent_session_id": "sess-001",
-            "initial_messages": [
-                {"role": "user", "content": "hello"},
-                {"role": "assistant", "content": "hi"},
-            ],
-        })
-        assert response.status_code == 201
-        assert response.json()["message_count"] == 2
 
     def test_create_session_duplicate_returns_409(self, client: TestClient) -> None:
         client.post("/v1/sessions", json={
@@ -176,12 +184,5 @@ class TestSessionsValidation:
     def test_create_session_missing_agent_id(self, client: TestClient) -> None:
         response = client.post("/v1/sessions", json={
             "agent_session_id": "sess-1",
-        })
-        assert response.status_code == 422
-
-    def test_create_session_invalid_message_role(self, client: TestClient) -> None:
-        response = client.post("/v1/sessions", json={
-            "agent_id": "agent-1",
-            "initial_messages": [{"role": "invalid", "content": "hi"}],
         })
         assert response.status_code == 422

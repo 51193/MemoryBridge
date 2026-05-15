@@ -142,25 +142,23 @@ Token 管理系统独立于向量数据库，数据存储在 `data/tokens.db`。
 
 ### Session 管理
 
-MemoryBridge 的会话历史存储在内存中，进程重启后丢失。通过 Session 导出/导入 API 可实现持久化恢复：
+MemoryBridge 的会话历史持久化存储在 SQLite 数据库中（`data/sessions.db`），进程重启后不丢失。每条消息以单独一行存储，支持 user / assistant / tool 等角色扩展。
 
 ```bash
-# 创建会话（可携带初始消息）
+# 创建会话（不携带初始消息）
 curl -X POST http://localhost:8000/v1/sessions \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"agent_id":"agent-1","agent_session_id":"sess-001","initial_messages":[{"role":"user","content":"你好"}]}'
+  -d '{"agent_id":"agent-1","agent_session_id":"sess-001"}'
 
-# 导出会话消息（user/assistant/tool，不含 system）
-curl -H "Authorization: Bearer <token>" \
-  http://localhost:8000/v1/sessions/agent-1/sess-001
-
-# 进程重启后，用导出的消息恢复会话
+# 不提供 session_id 则由服务端自动生成
 curl -X POST http://localhost:8000/v1/sessions \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"agent_id":"agent-1","agent_session_id":"sess-001","initial_messages":[...]}'
+  -d '{"agent_id":"agent-1"}'
 ```
+
+Session 创建后，后续每次 Chat 请求携带相同 `agent_session_id` 即可自动追加对话历史。读取时根据 `SESSION_WINDOW_SIZE` 配置取最近 N 条消息组装上下文。
 
 > **注意**：`system` 消息不存入会话历史。系统提示词每轮由 MemoryBridge 动态构建（注入长期记忆），外部可通过 `POST /v1/chat/completions` 的 `messages[0].role="system"` 传入自定义系统提示词。
 

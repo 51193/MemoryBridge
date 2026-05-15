@@ -2,7 +2,6 @@
 
 import logging
 import time
-import uuid
 from collections.abc import AsyncIterator
 from typing import Literal, cast
 
@@ -17,7 +16,7 @@ from ..core.session import SessionExistsError, SessionNotFoundError, SessionStor
 from ..exceptions import MemorySearchError, MemoryStoreError, ProviderNotFoundError
 from ..logfmt import structured_debug, structured_info
 from ..models.request import ChatRequest, Message, SessionCreateRequest
-from ..models.response import ChatResponse, SessionCreateResponse, SessionExportResponse
+from ..models.response import ChatResponse, SessionCreateResponse
 from ..providers.base import AbstractLLMProvider
 from ..providers.registry import ProviderRegistry
 from .dependencies import get_context_builder, get_memory_manager, get_session_store
@@ -70,58 +69,29 @@ async def create_session(
     req: SessionCreateRequest,
     session_store: SessionStore = Depends(get_session_store),
 ) -> dict[str, object]:
-    session_id: str = req.agent_session_id or uuid.uuid4().hex[:12]
-
     try:
-
-        msg_list: list[dict[str, object]] = (
-            _messages_as_dicts(req.initial_messages)
-            if req.initial_messages
-            else []
-        )
-        session_store.create(
-            req.agent_id, session_id, msg_list if msg_list else None
+        session_id: str = session_store.create(
+            agent_id=req.agent_id,
+            session_id=req.agent_session_id,
         )
     except SessionExistsError as e:
         structured_info(
             logger,
             "→ POST /v1/sessions → 409",
             agent_id=req.agent_id,
-            session_id=session_id,
+            session_id=req.agent_session_id,
         )
         raise HTTPException(status_code=409, detail=str(e))
 
-    stored_count: int = len(session_store.get(req.agent_id, session_id))
     structured_info(
         logger,
         "→ POST /v1/sessions → 201",
         agent_id=req.agent_id,
         session_id=session_id,
-        initial_messages=stored_count,
     )
     return {
         "agent_id": req.agent_id,
         "agent_session_id": session_id,
-        "message_count": stored_count,
-    }
-
-
-@router.get(
-    "/v1/sessions/{agent_id}/{session_id}",
-    response_model=SessionExportResponse,
-)
-async def get_session(
-    agent_id: str,
-    session_id: str,
-    session_store: SessionStore = Depends(get_session_store),
-) -> dict[str, object]:
-    history: list[dict[str, object]] = _resolve_session(
-        session_store, agent_id, session_id
-    )
-    return {
-        "agent_id": agent_id,
-        "agent_session_id": session_id,
-        "messages": _dicts_as_messages(history),
     }
 
 

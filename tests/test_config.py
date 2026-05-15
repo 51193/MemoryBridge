@@ -31,7 +31,7 @@ class TestSettings:
         assert settings.qdrant_port == 6333
         assert settings.memory_bridge_host == "0.0.0.0"
         assert settings.memory_bridge_port == 8000
-        assert settings.session_max_history == 50
+        assert settings.session_window_size == 10
 
     def test_custom_values(self) -> None:
         settings: Settings = _make_settings(
@@ -45,7 +45,7 @@ class TestSettings:
             qdrant_port=9999,
             memory_bridge_host="127.0.0.1",
             memory_bridge_port=9998,
-            session_max_history=100,
+            session_window_size=100,
         )
         assert settings.deepseek_api_key == "sk-custom"
         assert settings.deepseek_base_url == "https://custom.deepseek.com"
@@ -55,7 +55,7 @@ class TestSettings:
         assert settings.qdrant_host == "127.0.0.1"
         assert settings.qdrant_port == 9999
         assert settings.memory_bridge_port == 9998
-        assert settings.session_max_history == 100
+        assert settings.session_window_size == 100
 
     def test_validate_secrets_raises_when_empty(
         self, monkeypatch: pytest.MonkeyPatch,

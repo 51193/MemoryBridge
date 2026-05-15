@@ -47,10 +47,3 @@ class StreamChunk(BaseModel):
 class SessionCreateResponse(BaseModel):
     agent_id: str
     agent_session_id: str
-    message_count: int
-
-
-class SessionExportResponse(BaseModel):
-    agent_id: str
-    agent_session_id: str
-    messages: list[Message]

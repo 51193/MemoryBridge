@@ -26,4 +26,3 @@ class ChatRequest(BaseModel):
 class SessionCreateRequest(BaseModel):
     agent_id: str = Field(min_length=1)
     agent_session_id: str | None = None
-    initial_messages: list[Message] | None = None

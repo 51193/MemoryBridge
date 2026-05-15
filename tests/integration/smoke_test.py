@@ -101,21 +101,30 @@ def check_not_contains(haystack: str, needle: str, label: str) -> None:
 
 
 def phase_a() -> None:
-    step("CREATE session st")
+    step("CREATE session st (empty)")
     r = _req("POST", "/v1/sessions", {
         "agent_id": AGENT,
         "agent_session_id": "sess-st",
-        "initial_messages": [
-            {"role": "user", "content": "你好，我叫小明"},
-            {"role": "assistant", "content": "你好小明！"},
-        ],
     })
-    check(r["_status"] == 201, f"status=201 message_count={r.get('message_count')}")
-    check(r.get("message_count") == 2, "message_count=2")
+    check(r["_status"] == 201, "status=201")
+    check(r.get("agent_session_id") == "sess-st", "session_id=sess-st")
+
+    step("CHAT first turn (establishes session history)")
+    r = _req("POST", "/v1/chat/completions", {
+        "messages": [{"role": "user", "content": "你好，我叫小明"}],
+        "agent_id": AGENT,
+        "agent_session_id": "sess-st",
+        "memory_enabled": False,
+    })
+    check(r["_status"] == 200, "status=200")
+
+    step("SLEEP 0.5s (wait for session DB write)")
+    time.sleep(0.5)
+    log("       slept 0.5s ✓")
 
     step("CHAT short-term memory (memory_enabled=false)")
     r = _req("POST", "/v1/chat/completions", {
-            "messages": [{"role": "user", "content": "我叫什么名字？"}],
+        "messages": [{"role": "user", "content": "我叫什么名字？"}],
         "agent_id": AGENT,
         "agent_session_id": "sess-st",
         "memory_enabled": False,
@@ -138,7 +147,7 @@ def phase_b() -> None:
 
     step("CHAT write long-term facts")
     r = _req("POST", "/v1/chat/completions", {
-            "messages": [{
+        "messages": [{
             "role": "user",
             "content": "我最喜欢的颜色是蓝色，最喜欢的动物是猫"
         }],
@@ -150,9 +159,9 @@ def phase_b() -> None:
     content = r.get("choices", [{}])[0].get("message", {}).get("content", "")
     log(f"       LLM response preview: {content[:120]}...")
 
-    step("SLEEP 3s (wait for Mem0 background write)")
-    time.sleep(3)
-    log("       slept 3s ✓")
+    step("SLEEP 20s (wait for Mem0 background write)")
+    time.sleep(20)
+    log("       slept 20s ✓")
 
     step("CREATE session lt-verify (different session, same agent)")
     r = _req("POST", "/v1/sessions", {
@@ -163,7 +172,7 @@ def phase_b() -> None:
 
     step("CHAT verify long-term memory (new session, no history)")
     r = _req("POST", "/v1/chat/completions", {
-            "messages": [{"role": "user", "content": "请回忆我喜欢什么颜色和动物？"}],
+        "messages": [{"role": "user", "content": "请回忆我喜欢什么颜色和动物？"}],
         "agent_id": AGENT,
         "agent_session_id": "sess-lt-verify",
         "memory_enabled": True,
@@ -188,7 +197,7 @@ def phase_c() -> None:
 
     step("CHAT verify agent isolation")
     r = _req("POST", "/v1/chat/completions", {
-            "messages": [{"role": "user", "content": "请回忆我喜欢什么颜色和动物？"}],
+        "messages": [{"role": "user", "content": "请回忆我喜欢什么颜色和动物？"}],
         "agent_id": AGENT_OTHER,
         "agent_session_id": "sess-iso",
         "memory_enabled": True,
@@ -200,75 +209,20 @@ def phase_c() -> None:
     check_not_contains(content, "猫", "agent isolation (no '猫')")
 
 
-# ── Phase E: Session export → import round-trip ─────────────────────────
-
-
-def phase_e() -> None:
-    step("CREATE session export-src")
-    r = _req("POST", "/v1/sessions", {
-        "agent_id": AGENT,
-        "agent_session_id": "sess-export-src",
-        "initial_messages": [
-            {"role": "user", "content": "你好，我叫小刚"},
-            {"role": "assistant", "content": "你好小刚！"},
-        ],
-    })
-    check(r["_status"] == 201, "status=201")
-
-    step("CHAT one turn in export-src (memory_enabled=false)")
-    r = _req("POST", "/v1/chat/completions", {
-            "messages": [{"role": "user", "content": "回复一个字：好"}],
-        "agent_id": AGENT,
-        "agent_session_id": "sess-export-src",
-        "memory_enabled": False,
-    })
-    check(r["_status"] == 200, "status=200")
-
-    step("EXPORT session sess-export-src")
-    r = _req("GET", "/v1/sessions/agent-smoke/sess-export-src")
-    check(r["_status"] == 200, "status=200")
-    exported: list[dict[str, object]] = r.get("messages", [])
-    log(f"       exported {len(exported)} messages")
-    check(len(exported) >= 2, f"session has >= 2 messages (got {len(exported)})")
-    roles: list[str] = [str(m.get("role", "")) for m in exported]
-    check("system" not in roles, "no system role in exported messages")
-
-    step("IMPORT session via POST /v1/sessions (restore)")
-    r = _req("POST", "/v1/sessions", {
-        "agent_id": AGENT,
-        "agent_session_id": "sess-export-dst",
-        "initial_messages": exported,
-    })
-    check(r["_status"] == 201, "status=201")
-    check(r.get("message_count") == len(exported), f"message_count={len(exported)}")
-
-    step("CHAT verify restored session has history (memory_enabled=false)")
-    r = _req("POST", "/v1/chat/completions", {
-            "messages": [{"role": "user", "content": "我叫什么名字？请只回答名字"}],
-        "agent_id": AGENT,
-        "agent_session_id": "sess-export-dst",
-        "memory_enabled": False,
-    })
-    check(r["_status"] == 200, "status=200")
-    content = r.get("choices", [{}])[0].get("message", {}).get("content", "")
-    log(f"       LLM response: {content[:120]}")
-    check_contains(content, "小刚", "restored session contains '小刚' (export→import round-trip)")
-
-
 # ── Phase D: Edge cases ────────────────────────────────────────────────
 
 
 def phase_d() -> None:
     step("VALIDATE missing agent_session_id → 422")
     r = _req("POST", "/v1/chat/completions", {
-            "messages": [{"role": "user", "content": "hi"}],
+        "messages": [{"role": "user", "content": "hi"}],
         "agent_id": AGENT,
     })
     check(r["_status"] == 422, "status=422")
 
     step("VALIDATE unknown session → 404")
     r = _req("POST", "/v1/chat/completions", {
-            "messages": [{"role": "user", "content": "hi"}],
+        "messages": [{"role": "user", "content": "hi"}],
         "agent_id": AGENT,
         "agent_session_id": "nonexistent-session-id",
     })
@@ -289,7 +243,7 @@ def phase_d() -> None:
 
     step("CHAT thinking + stream")
     body_str: str = _sse_body("/v1/chat/completions", {
-            "messages": [{"role": "user", "content": "1+1等于几？"}],
+        "messages": [{"role": "user", "content": "1+1等于几？"}],
         "agent_id": AGENT,
         "agent_session_id": "sess-lt",
         "stream": True,
@@ -309,13 +263,12 @@ def phase_d() -> None:
     prompt_file.write_text(prompt_content, encoding="utf-8")
     log(f"       wrote custom prompt to {prompt_file}")
 
-    # Write both a tech fact and a pet fact — only the pet fact should be extracted
     _req("POST", "/v1/sessions", {
         "agent_id": AGENT,
         "agent_session_id": "sess-prompt",
     })
     r = _req("POST", "/v1/chat/completions", {
-            "messages": [{"role": "user", "content": "我喜欢Python，我养了一只叫旺财的狗"}],
+        "messages": [{"role": "user", "content": "我喜欢Python，我养了一只叫旺财的狗"}],
         "agent_id": AGENT,
         "agent_session_id": "sess-prompt",
         "memory_enabled": True,
@@ -326,25 +279,23 @@ def phase_d() -> None:
     )
     log(f"       LLM response: {content_preview}")
 
-    step("SLEEP 3s (wait for Mem0 write)")
-    time.sleep(3)
-    log("       slept 3s ✓")
+    step("SLEEP 20s (wait for Mem0 write)")
+    time.sleep(20)
+    log("       slept 20s ✓")
 
     step("CHAT verify custom prompt extraction")
     r = _req("POST", "/v1/chat/completions", {
-            "messages": [{"role": "user", "content": "我有什么宠物？叫什么？我有什么编程偏好？"}],
+        "messages": [{"role": "user", "content": "我有什么宠物？叫什么？我有什么编程偏好？"}],
         "agent_id": AGENT,
-        "agent_session_id": "sess-lt",       # reuse existing session
+        "agent_session_id": "sess-lt",
         "memory_enabled": True,
     })
     check(r["_status"] == 200, "status=200")
     content = r.get("choices", [{}])[0].get("message", {}).get("content", "")
     log(f"       LLM response: {content[:200]}")
-    # Pet fact should be extracted (custom prompt focuses on pets)
     check_contains(content, "旺财", "response contains '旺财' (pet extracted by custom prompt)")
     check_contains(content, "狗", "response contains '狗' (pet extracted by custom prompt)")
 
-    # Clean up the prompt file
     prompt_file.unlink()
 
     step("Health check")
@@ -378,7 +329,6 @@ def main() -> None:
         phase_a()
         phase_b()
         phase_c()
-        phase_e()
         phase_d()
     except SystemExit:
         raise

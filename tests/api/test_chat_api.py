@@ -1,5 +1,7 @@
 """Integration tests for chat completions and sessions API."""
 
+import os
+import tempfile
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,6 +18,7 @@ from memory_bridge.api.router import router
 from memory_bridge.core.context import ContextBuilder
 from memory_bridge.core.memory import MemoryManager
 from memory_bridge.core.session import SessionStore
+from memory_bridge.core.session_database import SessionDatabase
 from memory_bridge.core.tokens import TokenStore
 from memory_bridge.exceptions import MemorySearchError, MemoryStoreError
 from memory_bridge.models.request import Message
@@ -30,9 +33,31 @@ from memory_bridge.providers.base import AbstractLLMProvider
 from memory_bridge.providers.registry import ProviderRegistry
 
 
+_temp_paths: list[str] = []
+
+
+def _cleanup_temp_files() -> None:
+    for p in _temp_paths:
+        try:
+            os.unlink(p)
+        except OSError:
+            pass
+    _temp_paths.clear()
+
+
+def _new_session_store(window_size: int = 50) -> SessionStore:
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    _temp_paths.append(path)
+    SessionDatabase.initialize(path)
+    session_db: SessionDatabase = SessionDatabase(path)
+    return SessionStore(db=session_db, window_size=window_size)
+
+
 @pytest.fixture(autouse=True)
 def reset_registry() -> None:
     ProviderRegistry.reset()
+    _cleanup_temp_files()
 
 
 def _make_app(
@@ -52,7 +77,7 @@ def _make_app(
         app.state.memory_manager = memory_manager
         app.dependency_overrides[get_memory_manager] = lambda: memory_manager
 
-    ss: SessionStore = session_store or SessionStore()
+    ss: SessionStore = session_store or _new_session_store()
     app.state.session_store = ss
     if session_store is not None:
         app.dependency_overrides[get_session_store] = lambda: session_store
@@ -103,7 +128,7 @@ class TestHealth:
         mock_client.get = AsyncMock(return_value=mock_response)
 
         with patch("memory_bridge.api.router.httpx.AsyncClient", return_value=mock_client):
-            app: FastAPI = _make_app(session_store=SessionStore())
+            app: FastAPI = _make_app(session_store=_new_session_store())
             client: TestClient = TestClient(app)
             response = client.get("/health")
         assert response.status_code == 200
@@ -116,7 +141,7 @@ class TestHealth:
         mock_client.get = AsyncMock(side_effect=Exception("connection refused"))
 
         with patch("memory_bridge.api.router.httpx.AsyncClient", return_value=mock_client):
-            app: FastAPI = _make_app(session_store=SessionStore())
+            app: FastAPI = _make_app(session_store=_new_session_store())
             client: TestClient = TestClient(app)
             response = client.get("/health")
         assert response.status_code == 200
@@ -128,7 +153,7 @@ class TestHealth:
 
 class TestSessions:
     def test_create_session_201(self) -> None:
-        session_store: SessionStore = SessionStore()
+        session_store: SessionStore = _new_session_store()
         app: FastAPI = _make_app(session_store=session_store)
         client: TestClient = TestClient(app)
         response = client.post("/v1/sessions", json={
@@ -140,7 +165,7 @@ class TestSessions:
         session_store.get("agent-1", "sess-1")  # does not raise → exists
 
     def test_create_session_auto_generates_id(self) -> None:
-        session_store: SessionStore = SessionStore()
+        session_store: SessionStore = _new_session_store()
         app: FastAPI = _make_app(session_store=session_store)
         client: TestClient = TestClient(app)
         response = client.post("/v1/sessions", json={"agent_id": "agent-1"})
@@ -150,7 +175,7 @@ class TestSessions:
         session_store.get("agent-1", sid)  # does not raise → exists
 
     def test_create_session_duplicate_409(self) -> None:
-        session_store: SessionStore = SessionStore()
+        session_store: SessionStore = _new_session_store()
         session_store.create("agent-1", "sess-1")
         app: FastAPI = _make_app(session_store=session_store)
         client: TestClient = TestClient(app)
@@ -160,81 +185,6 @@ class TestSessions:
         })
         assert response.status_code == 409
         assert "SESSION_EXISTS" in response.json()["detail"]
-
-    def test_create_session_with_initial_messages(self) -> None:
-        session_store: SessionStore = SessionStore()
-        app: FastAPI = _make_app(session_store=session_store)
-        client: TestClient = TestClient(app)
-        response = client.post("/v1/sessions", json={
-            "agent_id": "agent-1",
-            "agent_session_id": "sess-1",
-            "initial_messages": [
-                {"role": "user", "content": "a"},
-                {"role": "assistant", "content": "b"},
-            ],
-        })
-        assert response.status_code == 201
-        assert response.json()["message_count"] == 2
-        history: list[dict[str, object]] = session_store.get("agent-1", "sess-1")
-        assert len(history) == 2
-
-    def test_create_session_filters_system(self) -> None:
-        session_store: SessionStore = SessionStore()
-        app: FastAPI = _make_app(session_store=session_store)
-        client: TestClient = TestClient(app)
-        response = client.post("/v1/sessions", json={
-            "agent_id": "agent-1",
-            "agent_session_id": "sess-1",
-            "initial_messages": [
-                {"role": "system", "content": "sys"},
-                {"role": "user", "content": "hello"},
-            ],
-        })
-        assert response.status_code == 201
-        assert response.json()["message_count"] == 1
-        history: list[dict[str, object]] = session_store.get("agent-1", "sess-1")
-        assert len(history) == 1
-        assert history[0]["role"] == "user"
-
-    def test_get_session_returns_history(self) -> None:
-        session_store: SessionStore = SessionStore()
-        session_store.create("agent-1", "sess-1", messages=[
-            {"role": "user", "content": "q1"},
-            {"role": "assistant", "content": "a1"},
-        ])
-        app: FastAPI = _make_app(session_store=session_store)
-        client: TestClient = TestClient(app)
-        response = client.get("/v1/sessions/agent-1/sess-1")
-        assert response.status_code == 200
-        body: dict[str, Any] = response.json()
-        assert body["agent_id"] == "agent-1"
-        assert body["agent_session_id"] == "sess-1"
-        assert len(body["messages"]) == 2
-        assert body["messages"][0]["role"] == "user"
-        assert body["messages"][0]["content"] == "q1"
-
-    def test_get_session_returns_404(self) -> None:
-        app: FastAPI = _make_app(session_store=SessionStore())
-        client: TestClient = TestClient(app)
-        response = client.get("/v1/sessions/agent-1/nonexistent")
-        assert response.status_code == 404
-        assert "SESSION_NOT_FOUND" in response.json()["detail"]
-
-    def test_get_session_excludes_system(self) -> None:
-        session_store: SessionStore = SessionStore()
-        session_store.create("agent-1", "sess-1", messages=[
-            {"role": "system", "content": "sys"},
-            {"role": "user", "content": "q1"},
-            {"role": "assistant", "content": "a1"},
-            {"role": "system", "content": "sys2"},
-        ])
-        app: FastAPI = _make_app(session_store=session_store)
-        client: TestClient = TestClient(app)
-        response = client.get("/v1/sessions/agent-1/sess-1")
-        assert response.status_code == 200
-        msgs: list[dict[str, Any]] = response.json()["messages"]
-        assert len(msgs) == 2
-        assert all(m["role"] != "system" for m in msgs)
 
 
 # ── Chat Completions ────────────────────────────────────────────────────
@@ -246,7 +196,7 @@ def _make_chat_app(
     mock_provider: MagicMock | None = None,
     token_enabled: bool = False,
 ) -> TestClient:
-    ss: SessionStore = session_store or SessionStore()
+    ss: SessionStore = session_store or _new_session_store()
     if memory_manager is not None:
         mm = memory_manager
     else:
@@ -263,7 +213,7 @@ def _make_chat_app(
 
 class TestTokenAuth:
     def test_missing_token_returns_401(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mm: MagicMock = MagicMock(spec=MemoryManager)
         app: FastAPI = _make_app(
@@ -280,7 +230,7 @@ class TestTokenAuth:
         assert response.json()["detail"] == "TOKEN_MISSING"
 
     def test_invalid_token_returns_401(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mm: MagicMock = MagicMock(spec=MemoryManager)
         app: FastAPI = _make_app(
@@ -310,7 +260,7 @@ class TestTokenAuth:
 
 class TestChatCompletions:
     def test_no_provider_registered_returns_502(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mm: MagicMock = MagicMock(spec=MemoryManager)
         app: FastAPI = _make_app(
@@ -335,7 +285,7 @@ class TestChatCompletions:
         assert "SESSION_NOT_FOUND" in response.json()["detail"]
 
     def test_memory_search_failure_returns_500(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
         mock_mm.search = AsyncMock(side_effect=MemorySearchError("Qdrant down"))
@@ -352,7 +302,7 @@ class TestChatCompletions:
         assert response.status_code == 500
 
     def test_memory_disabled_skips_search(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
         mock_mm.search = AsyncMock()
@@ -373,7 +323,7 @@ class TestChatCompletions:
         mock_mm.search.assert_not_called()
 
     def test_provider_error_returns_502(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
         mock_provider.chat = AsyncMock(side_effect=Exception("down"))
@@ -390,7 +340,7 @@ class TestChatCompletions:
         assert response.status_code == 502
 
     def test_non_streaming_success(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
         mock_mm.search = AsyncMock(return_value=[{"id": "1", "memory": "test memory"}])
@@ -418,8 +368,9 @@ class TestChatCompletions:
         )
 
     def test_session_history_injected(self) -> None:
-        ss: SessionStore = SessionStore()
-        ss.create("agent-1", "sess-1", messages=[
+        ss: SessionStore = _new_session_store()
+        ss.create("agent-1", "sess-1")
+        ss.append("agent-1", "sess-1", [
             {"role": "user", "content": "history-q"},
             {"role": "assistant", "content": "history-a"},
         ])
@@ -448,7 +399,7 @@ class TestChatCompletions:
         assert contents[2] == "current"
 
     def test_streaming_accept_header(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
 
@@ -485,7 +436,7 @@ class TestChatCompletions:
         assert "data:" in response.text
 
     def test_missing_session_id_returns_422(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         client: TestClient = _make_chat_app(session_store=ss)
         response = client.post("/v1/chat/completions", json={
             "messages": [{"role": "user", "content": "hello"}],
@@ -494,7 +445,7 @@ class TestChatCompletions:
         assert response.status_code == 422
 
     def test_non_streaming_schedules_memory_background_task(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
         mock_mm.search = AsyncMock(return_value=[])
@@ -515,7 +466,7 @@ class TestChatCompletions:
         mock_mm.add.assert_called_once()
 
     def test_streaming_stores_memory_after_completion(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
         mock_mm.search = AsyncMock(return_value=[])
@@ -546,7 +497,7 @@ class TestChatCompletions:
         mock_mm.add.assert_called_once()
 
     def test_streaming_does_not_store_on_empty_content(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
         mock_mm.search = AsyncMock(return_value=[])
@@ -572,7 +523,7 @@ class TestChatCompletions:
         mock_mm.add.assert_not_called()
 
     def test_store_memory_survives_memory_store_error(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
         mock_mm.search = AsyncMock(return_value=[])
@@ -596,7 +547,7 @@ class TestChatCompletions:
         assert len(ss.get("agent-1", "sess-1")) >= 2
 
     def test_store_memory_appends_to_session_before_memory_add(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
         mock_mm.search = AsyncMock(return_value=[])
@@ -625,7 +576,7 @@ class TestChatCompletions:
         assert len(history) >= 2
 
     def test_chat_completions_with_empty_memory_results(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
         mock_mm.search = AsyncMock(return_value=[])
@@ -647,7 +598,7 @@ class TestChatCompletions:
         )
 
     def test_valid_token_returns_200(self) -> None:
-        ss: SessionStore = SessionStore()
+        ss: SessionStore = _new_session_store()
         ss.create("agent-1", "sess-1")
         mock_mm: MagicMock = MagicMock(spec=MemoryManager)
         mock_mm.search = AsyncMock(return_value=[])

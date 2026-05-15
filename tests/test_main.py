@@ -22,7 +22,8 @@ def mock_settings() -> Generator[MagicMock, None, None]:
         settings.deepseek_reasoning_effort = None
         settings.qdrant_host = "localhost"
         settings.qdrant_port = 6333
-        settings.session_max_history = 50
+        settings.session_window_size = 10
+        settings.session_db_path = "data/test_sessions.db"
         settings.mem0_history_db_path = "data/mem0_history.db"
         settings.embedding_model = "text-embedding-v4"
         settings.embedding_dims = 1024
@@ -43,6 +44,7 @@ def mock_components() -> Generator[dict[str, MagicMock], None, None]:
         patch("memory_bridge.main.DeepSeekHttpClient") as mock_dhc,
         patch("memory_bridge.main.DeepSeekProvider") as mock_dp,
         patch("memory_bridge.main.SessionStore") as mock_ss,
+        patch("memory_bridge.main.SessionDatabase") as mock_sdb,
         patch("memory_bridge.main.ContextBuilder") as mock_cb,
     ):
         tdb: MagicMock = MagicMock()
@@ -73,6 +75,10 @@ def mock_components() -> Generator[dict[str, MagicMock], None, None]:
         cb: MagicMock = MagicMock()
         mock_cb.return_value = cb
 
+        sdb: MagicMock = MagicMock()
+        sdb.close = AsyncMock()
+        mock_sdb.return_value = sdb
+
         yield {
             "token_db": tdb,
             "token_store": ts,
@@ -80,6 +86,7 @@ def mock_components() -> Generator[dict[str, MagicMock], None, None]:
             "deepseek_http_client": dhc,
             "provider": dp,
             "session_store": ss,
+            "session_db": sdb,
             "context_builder": cb,
         }
 
@@ -148,12 +155,14 @@ class TestLifespan:
         mock_components["provider"].close.assert_called_once()
         mock_components["memory_manager"].close.assert_called_once()
         mock_components["token_store"].close.assert_called_once()
+        mock_components["session_db"].close.assert_called_once()
 
     async def test_does_not_crash_if_close_fails(
         self, mock_settings: MagicMock, mock_components: dict[str, MagicMock]
     ) -> None:
         mm = mock_components["memory_manager"]
         ts = mock_components["token_store"]
+        sdb = mock_components["session_db"]
         close_order: list[str] = []
 
         async def tracked_mm_close() -> None:
@@ -164,8 +173,13 @@ class TestLifespan:
             close_order.append("token_store")
             raise RuntimeError("fail too")
 
+        async def tracked_sdb_close() -> None:
+            close_order.append("session_db")
+            raise RuntimeError("fail three")
+
         mm.close = tracked_mm_close
         ts.close = tracked_ts_close
+        sdb.close = tracked_sdb_close
 
         app: FastAPI = FastAPI(title="Test")
         try:

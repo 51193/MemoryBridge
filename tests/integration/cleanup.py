@@ -112,6 +112,7 @@ def main() -> None:
     has_data: bool = (
         Path("data/mem0_history.db").exists()
         or Path("data/qdrant").exists()
+        or Path("data/sessions.db").exists()
     )
     if not has_data:
         print("No data found. Nothing to clean up.")
@@ -122,6 +123,8 @@ def main() -> None:
         print("  data/qdrant/ (Qdrant vector storage)")
     if Path("data/mem0_history.db").exists():
         print("  data/mem0_history.db (Mem0 history)")
+    if Path("data/sessions.db").exists():
+        print("  data/sessions.db (Session history)")
     print()
     answer: str = input("Type 'yes' to confirm: ")
     if answer.strip() != "yes":
@@ -139,6 +142,12 @@ def main() -> None:
     if history_db.exists():
         history_db.unlink()
         print("  ✓ removed data/mem0_history.db")
+
+    # Remove Session SQLite DB
+    session_db: Path = Path("data/sessions.db")
+    if session_db.exists():
+        session_db.unlink()
+        print("  ✓ removed data/sessions.db")
 
     # Remove Qdrant storage directory
     qdrant_dir: Path = Path("data/qdrant")

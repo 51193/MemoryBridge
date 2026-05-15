@@ -26,7 +26,8 @@ class Settings(BaseSettings):
 
     memory_bridge_host: str = "0.0.0.0"
     memory_bridge_port: int = 8000
-    session_max_history: int = 50
+    session_window_size: int = 10
+    session_db_path: str = "data/sessions.db"
     prompts_dir: str = "prompts"
     token_db_path: str = "data/tokens.db"
 

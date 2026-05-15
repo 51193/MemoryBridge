@@ -1,14 +1,17 @@
-"""Session store — pure in-memory conversation history management.
+"""Session store — persistent conversation history via SQLite.
 
+Each message is stored as a single row in the messages table.
 System messages are filtered out on write — only user, assistant, and tool
-messages are persisted in the session deque. The system prompt is injected by
-ContextBuilder at the top of each request, never stored in history.
+messages are persisted. On read, the most recent N messages (window_size)
+are retrieved and ordered chronologically.
 """
 
 import logging
-from collections import deque
+import sqlite3
+import uuid
 
 from ..logfmt import structured_debug, structured_info
+from .session_database import SessionDatabase
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -29,56 +32,43 @@ class SessionNotFoundError(Exception):
 
 
 class SessionStore:
-    """In-memory session history store.
+    """Persistent session history store backed by SQLite.
 
     Sessions are keyed by (agent_id, session_id) tuples.
-    Each session holds at most max_history messages.
+    Each read returns at most window_size messages from the tail of the history.
     System messages are filtered on write — only user/assistant/tool are stored.
-    All data is lost on process restart.
     """
 
-    def __init__(self, max_history: int = 50) -> None:
-        self._sessions: dict[tuple[str, str], deque[dict[str, object]]] = {}
-        self._max_history: int = max_history
+    def __init__(self, db: SessionDatabase, window_size: int = 50) -> None:
+        self._db: SessionDatabase = db
+        self._window_size: int = window_size
 
-    def create(
-        self,
-        agent_id: str,
-        session_id: str,
-        messages: list[dict[str, object]] | None = None,
-    ) -> None:
-        key: tuple[str, str] = (agent_id, session_id)
-        if key in self._sessions:
-            structured_info(
-                logger,
-                "session create conflict",
-                agent_id=agent_id,
-                session_id=session_id,
+    def create(self, agent_id: str, session_id: str | None = None) -> str:
+        sid: str = session_id or uuid.uuid4().hex[:12]
+        try:
+            self._db.execute(
+                "INSERT INTO sessions (agent_id, session_id) VALUES (?, ?)",
+                (agent_id, sid),
             )
+            self._db.commit()
+        except sqlite3.IntegrityError:
             raise SessionExistsError(
-                f"SESSION_EXISTS: session {session_id} already exists"
-                f" for agent {agent_id}"
+                f"SESSION_EXISTS: session {sid} already exists for agent {agent_id}"
             )
-        dq: deque[dict[str, object]] = deque[dict[str, object]](
-            maxlen=self._max_history
-        )
-        msg_count: int = 0
-        if messages:
-            filtered: list[dict[str, object]] = _filter_system(messages)
-            dq.extend(filtered)
-            msg_count = len(filtered)
-        self._sessions[key] = dq
         structured_info(
             logger,
             "session created",
             agent_id=agent_id,
-            session_id=session_id,
-            messages_count=msg_count,
+            session_id=sid,
         )
+        return sid
 
     def get(self, agent_id: str, session_id: str) -> list[dict[str, object]]:
-        key: tuple[str, str] = (agent_id, session_id)
-        if key not in self._sessions:
+        cursor = self._db.execute(
+            "SELECT 1 FROM sessions WHERE agent_id = ? AND session_id = ?",
+            (agent_id, session_id),
+        )
+        if not cursor.fetchone():
             structured_debug(
                 logger,
                 "session get → not found",
@@ -88,7 +78,17 @@ class SessionStore:
             raise SessionNotFoundError(
                 f"SESSION_NOT_FOUND: session {session_id} for agent {agent_id}"
             )
-        history: list[dict[str, object]] = list(self._sessions[key])
+        cursor = self._db.execute(
+            "SELECT role, content FROM messages "
+            "WHERE agent_id = ? AND session_id = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (agent_id, session_id, self._window_size),
+        )
+        rows: list[tuple[str, str]] = cursor.fetchall()
+        history: list[dict[str, object]] = [
+            {"role": role, "content": content}
+            for role, content in reversed(rows)
+        ]
         structured_debug(
             logger,
             "session history retrieved",
@@ -104,16 +104,31 @@ class SessionStore:
         session_id: str,
         messages: list[dict[str, object]],
     ) -> None:
-        key: tuple[str, str] = (agent_id, session_id)
-        if key not in self._sessions:
-            self._sessions[key] = deque[dict[str, object]](maxlen=self._max_history)
+        cursor = self._db.execute(
+            "SELECT 1 FROM sessions WHERE agent_id = ? AND session_id = ?",
+            (agent_id, session_id),
+        )
+        if not cursor.fetchone():
+            raise SessionNotFoundError(
+                f"SESSION_NOT_FOUND: session {session_id} for agent {agent_id}"
+            )
         filtered: list[dict[str, object]] = _filter_system(messages)
-        self._sessions[key].extend(filtered)
+        for msg in filtered:
+            self._db.execute(
+                "INSERT INTO messages (agent_id, session_id, role, content) "
+                "VALUES (?, ?, ?, ?)",
+                (
+                    agent_id,
+                    session_id,
+                    str(msg["role"]),
+                    str(msg["content"]),
+                ),
+            )
+        self._db.commit()
         structured_debug(
             logger,
             "session appended",
             agent_id=agent_id,
             session_id=session_id,
             added=len(filtered),
-            total=len(self._sessions[key]),
         )
