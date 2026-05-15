@@ -34,7 +34,6 @@ from memory_bridge.models.response import (
 from memory_bridge.providers.base import AbstractLLMProvider
 from memory_bridge.providers.registry import ProviderRegistry
 
-
 _temp_paths: list[str] = []
 
 

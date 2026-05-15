@@ -26,7 +26,6 @@ from memory_bridge.core.session_database import SessionDatabase
 from memory_bridge.providers.base import AbstractLLMProvider
 from memory_bridge.providers.registry import ProviderRegistry
 
-
 _temp_paths: list[str] = []
 
 
