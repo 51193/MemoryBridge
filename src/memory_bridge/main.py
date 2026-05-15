@@ -63,7 +63,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     config: dict[str, object] = build_mem0_config(settings)
     app.state.memory_manager = MemoryManager(config)
 
-    ProviderRegistry.register(settings.deepseek_model, app.state.provider)
+    app.state.provider_registry = ProviderRegistry()
+    app.state.provider_registry.register(settings.deepseek_model, app.state.provider)
     yield
     await app.state.provider.close()
     await app.state.memory_manager.close()

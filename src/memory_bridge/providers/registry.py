@@ -1,35 +1,26 @@
-"""Provider registry — maps model names to LLM providers."""
+"""Provider registry — maps model names to LLM providers.
+
+Instance-based — no class-level mutable state. Create one instance,
+register providers, and inject it where needed via FastAPI dependencies.
+"""
 
 from ..exceptions import ProviderNotFoundError
 from .base import AbstractLLMProvider
 
 
 class ProviderRegistry:
-    """Singleton registry for LLM providers.
+    """Registry for LLM providers, keyed by model name."""
 
-    Providers are registered by model name. Use get_default() to resolve
-    the currently registered provider.
-    """
+    def __init__(self) -> None:
+        self._providers: dict[str, AbstractLLMProvider] = {}
 
-    _providers: dict[str, AbstractLLMProvider] = {}
+    def register(self, model: str, provider: AbstractLLMProvider) -> None:
+        self._providers[model] = provider
 
-    @classmethod
-    def register(cls, model: str, provider: AbstractLLMProvider) -> None:
-        """Register a provider for a given model name."""
-        cls._providers[model] = provider
-
-    @classmethod
-    def get_default(cls) -> AbstractLLMProvider:
-        """Return the single registered provider.
-
-        Raises:
-            ProviderNotFoundError: If no provider has been registered.
-        """
-        if not cls._providers:
+    def get_default(self) -> AbstractLLMProvider:
+        if not self._providers:
             raise ProviderNotFoundError("No provider registered")
-        return next(iter(cls._providers.values()))
+        return next(iter(self._providers.values()))
 
-    @classmethod
-    def reset(cls) -> None:
-        """Clear all registered providers (for testing)."""
-        cls._providers.clear()
+    def reset(self) -> None:
+        self._providers.clear()

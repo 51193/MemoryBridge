@@ -5,6 +5,7 @@ import tempfile
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 from memory_bridge.api.dependencies import (
     get_context_builder,
     get_memory_manager,
+    get_provider_registry,
     get_session_store,
 )
 from memory_bridge.api.router import router
@@ -56,7 +58,6 @@ def _new_session_store(window_size: int = 50) -> SessionStore:
 
 @pytest.fixture(autouse=True)
 def reset_registry() -> None:
-    ProviderRegistry.reset()
     _cleanup_temp_files()
 
 
@@ -86,8 +87,10 @@ def _make_app(
     app.state.context_builder = cb
     app.dependency_overrides[get_context_builder] = lambda: cb
 
+    app.state.provider_registry = ProviderRegistry()
+    app.dependency_overrides[get_provider_registry] = lambda: app.state.provider_registry
     if mock_provider is not None:
-        ProviderRegistry.register("deepseek-chat", mock_provider)
+        app.state.provider_registry.register("deepseek-chat", mock_provider)
 
     app.state.model = "deepseek-chat"
 
@@ -138,7 +141,7 @@ class TestHealth:
         mock_client: MagicMock = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client.get = AsyncMock(side_effect=Exception("connection refused"))
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("connection refused"))
 
         with patch("memory_bridge.api.router.httpx.AsyncClient", return_value=mock_client):
             app: FastAPI = _make_app(session_store=_new_session_store())

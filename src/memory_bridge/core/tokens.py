@@ -8,7 +8,7 @@ import logging
 import secrets
 import sqlite3
 
-from .token_database import TokenDatabase
+from .token_database import TokenDatabase, TokenDatabaseError
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -41,6 +41,8 @@ class TokenStore:
                 ).fetchone()
             )
             return row is not None
+        except TokenDatabaseError:
+            raise
         except Exception:
             logger.exception("token validation failed")
             return False

@@ -62,10 +62,10 @@ def main() -> None:
 
     if len(sys.argv) > 1 and sys.argv[1] in ("--version", "-V"):
         try:
-            from importlib.metadata import version
+            from importlib.metadata import PackageNotFoundError, version
 
             print(f"memorybridge {version('memory-bridge')}")
-        except Exception:
+        except PackageNotFoundError:
             print("memorybridge dev")
         return
 
@@ -95,9 +95,7 @@ def main() -> None:
         sys.exit(1)
 
 
-def _run_init() -> None:
-    """Run first-time initialization: dirs, Qdrant, .env template, token DB, API token."""
-
+def _ensure_dirs() -> None:
     data_dir: Path = Path("data/qdrant")
     data_dir.mkdir(parents=True, exist_ok=True)
     print(f"Created data directory: {data_dir}")
@@ -106,12 +104,16 @@ def _run_init() -> None:
     prompts_dir.mkdir(parents=True, exist_ok=True)
     print(f"Created prompts directory: {prompts_dir}")
 
+
+def _ensure_qdrant_bin() -> None:
     qdrant_bin: Path = Path("bin/qdrant")
     if not qdrant_bin.exists():
         _download_qdrant(qdrant_bin)
     else:
         print(f"Qdrant binary found at {qdrant_bin}, skipping download.")
 
+
+def _ensure_env_template() -> None:
     env_file: Path = Path(".env")
     if not env_file.exists():
         env_file.write_text(
@@ -140,6 +142,8 @@ def _run_init() -> None:
     else:
         print(".env already exists, skipping.")
 
+
+def _init_databases() -> str:
     from .core.token_database import TokenDatabase
     from .core.tokens import TokenStore
 
@@ -157,6 +161,16 @@ def _run_init() -> None:
     session_db_path: str = os.environ.get("SESSION_DB_PATH", "data/sessions.db")
     print(f"Initializing session database: {session_db_path}")
     SessionDatabase.initialize(session_db_path)
+    return token
+
+
+def _run_init() -> None:
+    """Run first-time initialization: dirs, Qdrant, .env template, token DB, API token."""
+    _ensure_dirs()
+    _ensure_qdrant_bin()
+    _ensure_env_template()
+    token: str = _init_databases()
+
     print()
     print("=== Init complete ===")
     print()
@@ -296,29 +310,7 @@ def _start_qdrant(
 
     health_url: str = f"http://{settings.qdrant_host}:{settings.qdrant_port}/healthz"
     logger.info("starting Qdrant on %s ...", health_url)
-    for _ in range(QDRANT_STARTUP_TIMEOUT):
-        if proc.poll() is not None:
-            stderr_text: str = _read_stderr(proc)
-            raise HostManagerError(
-                f"Qdrant exited prematurely (code={proc.returncode}). "
-                + (f"stderr: {stderr_text}" if stderr_text else "no stderr output")
-            )
-        try:
-            r: httpx.Response = httpx.get(health_url, timeout=1.0)
-            if r.status_code == 200:
-                break
-        except httpx.RequestError:
-            pass
-        time.sleep(1.0)
-    else:
-        stderr_text = _read_stderr(proc)
-        proc.kill()
-        raise HostManagerError(
-            "Qdrant failed to start within timeout. "
-            + (f"stderr: {stderr_text}" if stderr_text else "no stderr output")
-        )
-
-    logger.info("Qdrant started pid=%s", proc.pid)
+    _poll_health(proc, health_url, QDRANT_STARTUP_TIMEOUT, "Qdrant")
     return proc
 
 
@@ -326,6 +318,46 @@ def _read_stderr(proc: subprocess.Popen[bytes]) -> str:
     if proc.stderr is None:
         return ""
     return proc.stderr.read().decode("utf-8", errors="replace").strip()
+
+
+def _poll_health(
+    proc: subprocess.Popen[bytes],
+    health_url: str,
+    timeout_seconds: int,
+    label: str,
+    *,
+    shutdown_qdrant: bool = False,
+) -> None:
+    """Poll health_url until the process responds 200 or times out.
+
+    Raises HostManagerError if the process exits prematurely or fails to start.
+    """
+    for _ in range(timeout_seconds):
+        if proc.poll() is not None:
+            stderr_text: str = _read_stderr(proc)
+            if shutdown_qdrant:
+                _shutdown_qdrant()
+            raise HostManagerError(
+                f"{label} exited prematurely (code={proc.returncode}). "
+                + (f"stderr: {stderr_text}" if stderr_text else "no stderr output")
+            )
+        try:
+            r: httpx.Response = httpx.get(health_url, timeout=1.0)
+            if r.status_code == 200:
+                logger.info("%s started pid=%s", label, proc.pid)
+                return
+        except httpx.RequestError:
+            pass
+        time.sleep(1.0)
+
+    stderr_text = _read_stderr(proc)
+    proc.kill()
+    if shutdown_qdrant:
+        _shutdown_qdrant()
+    raise HostManagerError(
+        f"{label} failed to start within timeout. "
+        + (f"stderr: {stderr_text}" if stderr_text else "no stderr output")
+    )
 
 
 def _start_bridge(settings: Settings) -> subprocess.Popen[bytes]:
@@ -356,31 +388,8 @@ def _start_bridge(settings: Settings) -> subprocess.Popen[bytes]:
     )
 
     logger.info("starting MemoryBridge on %s ...", health_url)
-    for _ in range(BRIDGE_STARTUP_TIMEOUT):
-        if proc.poll() is not None:
-            stderr_text: str = _read_stderr(proc)
-            _shutdown_qdrant()
-            raise HostManagerError(
-                f"MemoryBridge exited prematurely (code={proc.returncode}). "
-                + (f"stderr: {stderr_text}" if stderr_text else "no stderr output")
-            )
-        try:
-            r: httpx.Response = httpx.get(health_url, timeout=1.0)
-            if r.status_code == 200:
-                break
-        except httpx.RequestError:
-            pass
-        time.sleep(1.0)
-    else:
-        stderr_text = _read_stderr(proc)
-        proc.kill()
-        _shutdown_qdrant()
-        raise HostManagerError(
-            "MemoryBridge failed to start within timeout. "
-            + (f"stderr: {stderr_text}" if stderr_text else "no stderr output")
-        )
-
-    logger.info("MemoryBridge started pid=%s", proc.pid)
+    _poll_health(proc, health_url, BRIDGE_STARTUP_TIMEOUT, "MemoryBridge",
+                 shutdown_qdrant=True)
     return proc
 
 

@@ -11,6 +11,7 @@ from fastapi import Request
 from ..core.context import ContextBuilder
 from ..core.memory import MemoryManager
 from ..core.session import SessionStore
+from ..providers.registry import ProviderRegistry
 
 
 def get_memory_manager(request: Request) -> MemoryManager:
@@ -23,3 +24,7 @@ def get_session_store(request: Request) -> SessionStore:
 
 def get_context_builder(request: Request) -> ContextBuilder:
     return cast(ContextBuilder, request.app.state.context_builder)
+
+
+def get_provider_registry(request: Request) -> ProviderRegistry:
+    return cast(ProviderRegistry, request.app.state.provider_registry)

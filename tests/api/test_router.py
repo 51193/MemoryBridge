@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from memory_bridge.api.dependencies import (
     get_context_builder,
     get_memory_manager,
+    get_provider_registry,
     get_session_store,
 )
 from memory_bridge.api.router import router
@@ -49,7 +50,6 @@ def _make_temp_session_store() -> SessionStore:
 
 @pytest.fixture(autouse=True)
 def reset_state() -> None:
-    ProviderRegistry.reset()
     _cleanup_temp_files()
 
 
@@ -68,7 +68,10 @@ def _make_app() -> FastAPI:
     app.dependency_overrides[get_context_builder] = lambda: ContextBuilder()
 
     mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
-    ProviderRegistry.register("deepseek-chat", mock_provider)
+    registry: ProviderRegistry = ProviderRegistry()
+    registry.register("deepseek-chat", mock_provider)
+    app.state.provider_registry = registry
+    app.dependency_overrides[get_provider_registry] = lambda: registry
 
     app.include_router(router)
     return app

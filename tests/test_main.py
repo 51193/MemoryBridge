@@ -125,8 +125,7 @@ class TestLifespan:
     ) -> None:
         app: FastAPI = FastAPI(title="Test")
         async with lifespan(app):
-            from memory_bridge.providers.registry import ProviderRegistry
-            assert ProviderRegistry.get_default() is mock_components["provider"]
+            assert app.state.provider_registry.get_default() is mock_components["provider"]
 
     async def test_sets_token_disabled_when_no_tokens(
         self,

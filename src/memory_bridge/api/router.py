@@ -19,7 +19,12 @@ from ..models.request import ChatRequest, Message, SessionCreateRequest
 from ..models.response import ChatResponse, SessionCreateResponse
 from ..providers.base import AbstractLLMProvider
 from ..providers.registry import ProviderRegistry
-from .dependencies import get_context_builder, get_memory_manager, get_session_store
+from .dependencies import (
+    get_context_builder,
+    get_memory_manager,
+    get_provider_registry,
+    get_session_store,
+)
 
 logger: logging.Logger = logging.getLogger(__name__)
 router: APIRouter = APIRouter()
@@ -48,12 +53,13 @@ def _dicts_as_messages(dicts: list[dict[str, object]]) -> list[Message]:
 @router.get("/health")
 async def health(request: Request) -> dict[str, str]:
     qdrant_health_url: str = request.app.state.qdrant_health_url
+    qdrant_status: str = "disconnected"
     try:
         async with httpx.AsyncClient() as client:
             r: httpx.Response = await client.get(qdrant_health_url, timeout=2.0)
-        qdrant_status: str = "connected" if r.status_code == 200 else "disconnected"
-    except Exception:
-        qdrant_status = "disconnected"
+        qdrant_status = "connected" if r.status_code == 200 else "disconnected"
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError):
+        logger.debug("qdrant health check failed", exc_info=True)
     return {"status": "ok", "qdrant": qdrant_status}
 
 
@@ -98,9 +104,11 @@ async def create_session(
 # ── Chat completions: decomposed helpers ─────────────────────────────────
 
 
-def _resolve_provider() -> AbstractLLMProvider:
+def _resolve_provider(
+    registry: ProviderRegistry,
+) -> AbstractLLMProvider:
     try:
-        return ProviderRegistry.get_default()
+        return registry.get_default()
     except ProviderNotFoundError as e:
         logger.warning("no provider registered")
         raise HTTPException(status_code=502, detail=str(e))
@@ -187,32 +195,15 @@ def _schedule_memory_store(
 # ── Chat Completions (handler) ──────────────────────────────────────────
 
 
-@router.post("/v1/chat/completions", response_model=None)
-async def chat_completions(
+async def _prepare_chat_context(
     request: ChatRequest,
-    fastapi_request: Request,
-    background_tasks: BackgroundTasks,
-    memory_manager: MemoryManager = Depends(get_memory_manager),
-    session_store: SessionStore = Depends(get_session_store),
-    context_builder: ContextBuilder = Depends(get_context_builder),
-) -> ChatResponse | StreamingResponse:
-    t0: float = time.monotonic()
-
-    structured_info(
-        logger,
-        "→ POST /v1/chat/completions",
-        agent_id=request.agent_id,
-        session_id=request.agent_session_id,
-        model=fastapi_request.app.state.model,
-        stream=str(request.stream),
-        memory=str(request.memory_enabled),
-    )
-
-    provider: AbstractLLMProvider = _resolve_provider()
+    session_store: SessionStore,
+    memory_manager: MemoryManager,
+    context_builder: ContextBuilder,
+) -> ChatRequest:
     session_history: list[dict[str, object]] = _resolve_session(
         session_store, request.agent_id, request.agent_session_id
     )
-
     memories: list[dict[str, object]] = []
     if request.memory_enabled:
         try:
@@ -228,6 +219,35 @@ async def chat_completions(
     enriched_request: ChatRequest
     enriched_request, _ = _build_enriched_request(
         request, session_history, memories, context_builder
+    )
+    return enriched_request
+
+
+@router.post("/v1/chat/completions", response_model=None)
+async def chat_completions(
+    request: ChatRequest,
+    fastapi_request: Request,
+    background_tasks: BackgroundTasks,
+    memory_manager: MemoryManager = Depends(get_memory_manager),
+    session_store: SessionStore = Depends(get_session_store),
+    context_builder: ContextBuilder = Depends(get_context_builder),
+    provider_registry: ProviderRegistry = Depends(get_provider_registry),
+) -> ChatResponse | StreamingResponse:
+    t0: float = time.monotonic()
+
+    structured_info(
+        logger,
+        "→ POST /v1/chat/completions",
+        agent_id=request.agent_id,
+        session_id=request.agent_session_id,
+        model=fastapi_request.app.state.model,
+        stream=str(request.stream),
+        memory=str(request.memory_enabled),
+    )
+
+    provider: AbstractLLMProvider = _resolve_provider(provider_registry)
+    enriched_request: ChatRequest = await _prepare_chat_context(
+        request, session_store, memory_manager, context_builder
     )
 
     if request.stream:

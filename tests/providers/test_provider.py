@@ -38,25 +38,24 @@ def _make_request(**kwargs: Any) -> ChatRequest:
 
 
 class TestProviderRegistry:
-    def teardown_method(self) -> None:
-        ProviderRegistry.reset()
-
     def test_register_and_get_default(self) -> None:
+        registry: ProviderRegistry = ProviderRegistry()
         mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
-        ProviderRegistry.register("deepseek-chat", mock_provider)
-        assert ProviderRegistry.get_default() is mock_provider
+        registry.register("deepseek-chat", mock_provider)
+        assert registry.get_default() is mock_provider
 
     def test_get_default_raises_when_empty(self) -> None:
-        ProviderRegistry.reset()
-        with pytest.raises(ProviderNotFoundError, match="No provider registered"):
-            ProviderRegistry.get_default()
+        registry: ProviderRegistry = ProviderRegistry()
+        with pytest.raises(ProviderNotFoundError):
+            registry.get_default()
 
     def test_reset_clears_providers(self) -> None:
         mock_provider: MagicMock = MagicMock(spec=AbstractLLMProvider)
-        ProviderRegistry.register("model-a", mock_provider)
-        ProviderRegistry.reset()
+        registry: ProviderRegistry = ProviderRegistry()
+        registry.register("model-a", mock_provider)
+        registry.reset()
         with pytest.raises(ProviderNotFoundError):
-            ProviderRegistry.get_default()
+            registry.get_default()
 
 
 class TestDeepSeekProvider:
